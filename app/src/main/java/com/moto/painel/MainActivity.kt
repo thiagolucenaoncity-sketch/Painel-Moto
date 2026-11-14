@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -244,11 +245,19 @@ class MainActivity : Activity() {
     private var units = 0
     private var appliedVer = -1
 
+    // Orientação: 0 = automático, 1 = paisagem fixa, 2 = retrato fixo
+    private var orientMode = 0
+
     // Mapas (miniatura no painel + mapa completo) e seus overlays de localização
     private val maps = ArrayList<MapView>()
     private val myOverlays = ArrayList<MyLocationNewOverlay>()
     private var showMap = false
     private var locationStarted = false
+
+    // Player flutuante
+    private var musicOpen = false
+    private lateinit var musicFab: Button
+    private lateinit var musicPopup: LinearLayout
 
     // Painel
     private lateinit var panelScreen: LinearLayout
@@ -378,6 +387,7 @@ class MainActivity : Activity() {
             }
         }
 
+        applyOrientation()
         setContentView(buildUi())
 
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -451,6 +461,22 @@ class MainActivity : Activity() {
         gpsView.setTextColor(color)
     }
 
+    // ---------- Orientação ----------
+
+    private fun applyOrientation() {
+        requestedOrientation = when (orientMode) {
+            1 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    private fun orientLabel(): String = when (orientMode) {
+        1 -> "⬌"
+        2 -> "⬍"
+        else -> "⟳"
+    }
+
     // ---------- Unidades ----------
 
     private fun speedText(kmh: Int): String =
@@ -468,6 +494,8 @@ class MainActivity : Activity() {
         showMap = map
         panelScreen.visibility = if (map) View.GONE else View.VISIBLE
         mapScreen.visibility = if (map) View.VISIBLE else View.GONE
+        musicFab.visibility = if (map) View.GONE else View.VISIBLE
+        musicPopup.visibility = if (map || !musicOpen) View.GONE else View.VISIBLE
     }
 
     private fun newMap(): MapView {
@@ -836,6 +864,19 @@ class MainActivity : Activity() {
         minimumHeight = 0
     }
 
+    // Botão pequeno quadrado, para ícones
+    private fun miniBtn(caption: String): Button = Button(this).apply {
+        text = caption
+        textSize = 16f
+        setTextColor(Color.WHITE)
+        isAllCaps = false
+        stateListAnimator = null
+        background = box(context, BTN_BG, 12, BORDER)
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(0, 0, 0, 0)
+    }
+
     private fun statCard(title: String, value: TextView): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
@@ -882,6 +923,20 @@ class MainActivity : Activity() {
         mapScreen = buildMapScreen()
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        // Player: painel que abre (acima do botão) e botão flutuante no canto
+        frame.addView(
+            musicPopup,
+            FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply {
+                setMargins(px(12), 0, px(12), px(84))
+            }
+        )
+        frame.addView(
+            musicFab,
+            FrameLayout.LayoutParams(px(56), px(56), Gravity.END or Gravity.BOTTOM).apply {
+                setMargins(0, 0, px(16), px(16))
+            }
+        )
 
         setScreen(showMap)
         if (locationStarted) enableOverlays()
@@ -965,23 +1020,21 @@ class MainActivity : Activity() {
         tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
         tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Card da música
+        // Player: capa, título e artista (versão menor)
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = box(context, CARD_BG, 18, BORDER)
-            setPadding(px(12), px(12), px(12), px(12))
         }
         artView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            background = box(context, BTN_BG, 12)
+            background = box(context, BTN_BG, 10)
             clipToOutline = true
         }
-        titleView = label(17f, Color.WHITE, bold = true).apply {
+        titleView = label(15f, Color.WHITE, bold = true).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        artistView = label(13f, GRAY).apply {
+        artistView = label(12f, GRAY).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -990,39 +1043,77 @@ class MainActivity : Activity() {
         }
         val textCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(12), 0, px(8), 0)
+            setPadding(px(10), 0, px(6), 0)
             addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(artistView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         eqView = EqualizerView(this).apply { tint = accent }
-        card.addView(artView, LinearLayout.LayoutParams(px(64), px(64)))
+        card.addView(artView, LinearLayout.LayoutParams(px(48), px(48)))
         card.addView(textCol, LinearLayout.LayoutParams(0, WRAP, 1f))
-        card.addView(eqView, LinearLayout.LayoutParams(px(44), px(36)))
+        card.addView(eqView, LinearLayout.LayoutParams(px(32), px(24)))
 
-        // Controles de música
-        val prevBtn = pill("⏮", BTN_BG, Color.WHITE, 22f)
+        // Controles de música (versão menor)
+        val prevBtn = pill("⏮", BTN_BG, Color.WHITE, 18f)
         prevBtn.setOnClickListener { control { it.skipToPrevious() } }
-        playBtn = pill("▶", accent, Color.BLACK, 28f)
+        playBtn = pill("▶", accent, Color.BLACK, 22f)
         playBtn.setOnClickListener {
             control {
                 if (controller?.playbackState?.state == PlaybackState.STATE_PLAYING) it.pause() else it.play()
             }
         }
-        val nextBtn = pill("⏭", BTN_BG, Color.WHITE, 22f)
+        val nextBtn = pill("⏭", BTN_BG, Color.WHITE, 18f)
         nextBtn.setOnClickListener { control { it.skipToNext() } }
         val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(prevBtn, LinearLayout.LayoutParams(0, px(64), 1f).apply { setMargins(px(4), 0, px(4), 0) })
-        controls.addView(playBtn, LinearLayout.LayoutParams(0, px(64), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
-        controls.addView(nextBtn, LinearLayout.LayoutParams(0, px(64), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+        controls.addView(prevBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+        controls.addView(playBtn, LinearLayout.LayoutParams(0, px(48), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
+        controls.addView(nextBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Botões de navegação entre telas
-        val mapBtn = pill("🗺  Abrir mapa", BLUE_DARK, Color.WHITE, 15f)
+        // Painel do player, escondido até tocar no botão ♪
+        musicPopup = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = box(context, CARD_BG, 18, BORDER)
+            setPadding(px(10), px(10), px(10), px(10))
+            visibility = if (musicOpen) View.VISIBLE else View.GONE
+            addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(controls, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
+        }
+
+        // Botão flutuante ♪ / ✕
+        musicFab = Button(this).apply {
+            text = if (musicOpen) "✕" else "♪"
+            textSize = 22f
+            setTextColor(Color.BLACK)
+            isAllCaps = false
+            stateListAnimator = null
+            background = box(context, accent, 28)
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(0, 0, 0, 0)
+            setOnClickListener {
+                musicOpen = !musicOpen
+                musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
+                text = if (musicOpen) "✕" else "♪"
+            }
+        }
+
+        // Botões pequenos: mapa, configurações e rotação
+        val mapBtn = miniBtn("🗺")
         mapBtn.setOnClickListener { setScreen(true) }
-        val settingsBtn = pill("⚙  Configurações", BTN_BG, Color.WHITE, 15f)
+        val settingsBtn = miniBtn("⚙")
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        val navRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        navRow.addView(mapBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
-        navRow.addView(settingsBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+        val rotateBtn = miniBtn(orientLabel())
+        rotateBtn.setOnClickListener {
+            orientMode = (orientMode + 1) % 3
+            applyOrientation()
+            rotateBtn.text = orientLabel()
+        }
+        val navRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
+        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
+        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
@@ -1036,8 +1127,6 @@ class MainActivity : Activity() {
             right.addView(navView, gap(0))
             right.addView(statsRow, gap(4))
             right.addView(tripRow, gap(8))
-            right.addView(card, gap(10))
-            right.addView(controls, gap(10))
             right.addView(navRow, gap(10))
 
             val scroll = ScrollView(this).apply {
@@ -1053,8 +1142,6 @@ class MainActivity : Activity() {
             root.addView(navView, gap(4))
             root.addView(statsRow, gap(8))
             root.addView(tripRow, gap(8))
-            root.addView(card, gap(12))
-            root.addView(controls, gap(12))
             root.addView(navRow, gap(10))
         }
         return root
