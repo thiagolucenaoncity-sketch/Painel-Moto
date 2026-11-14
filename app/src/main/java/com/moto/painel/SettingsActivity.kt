@@ -45,6 +45,11 @@ class SettingsActivity : Activity() {
         col.addView(cycler("Velocímetro", Prefs.GAUGE_NAMES, "gauge"))
         col.addView(cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
 
+        col.addView(section("CORES DO VELOCÍMETRO", accent))
+        col.addView(cycler("Cor do velocímetro", Prefs.COLOR_NAMES, "arc_color"))
+        col.addView(cycler("Cor dos números", Prefs.COLOR_NAMES, "num_color"))
+        col.addView(cycler("Cor do texto km/h", Prefs.COLOR_NAMES, "unit_color"))
+
         col.addView(section("UNIDADES", accent))
         col.addView(cycler("Medidas", Prefs.UNIT_NAMES, "units"))
 
@@ -95,7 +100,7 @@ class SettingsActivity : Activity() {
         fun show(i: Int) {
             b.text = "$label: ${names[i]}"
         }
-        show(Prefs.getInt(this, key))
+        show(Prefs.getInt(this, key).coerceIn(0, names.size - 1))
         b.isAllCaps = false
         b.setTextColor(Color.WHITE)
         b.setBackgroundColor(0xFF14284A.toInt())
