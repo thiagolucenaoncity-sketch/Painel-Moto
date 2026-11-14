@@ -30,6 +30,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -80,16 +81,14 @@ import kotlin.math.roundToInt
 private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 
-// ---------- Cores e helpers ----------
+// ---------- Cores padrão e helpers ----------
 
 private val BLUE = 0xFF2EA8FF.toInt()
-private val BLUE_DARK = 0xFF1B5FBF.toInt()
 private val BLUE_LIGHT = 0xFF8FD8FF.toInt()
 private val GREEN = 0xFF3DDC84.toInt()
 private val YELLOW = 0xFFFFC107.toInt()
 private val RED = 0xFFFF4D4D.toInt()
 private val GRAY = 0xFF7F93B5.toInt()
-private val CARD_BG = 0xCC0C1B33.toInt()
 private val BORDER = 0xFF1F4E8C.toInt()
 private val BTN_BG = 0xFF14284A.toInt()
 
@@ -98,6 +97,16 @@ private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 private fun Context.px(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 private fun Context.pxF(v: Float): Float = v * resources.displayMetrics.density
+
+// Troca só a transparência de uma cor
+private fun withAlpha(c: Int, a: Int): Int = (c and 0x00FFFFFF) or (a shl 24)
+
+// Escurece uma cor pelo fator f (0 = preto, 1 = igual)
+private fun shade(c: Int, f: Float): Int = Color.rgb(
+    (Color.red(c) * f).roundToInt(),
+    (Color.green(c) * f).roundToInt(),
+    (Color.blue(c) * f).roundToInt()
+)
 
 private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = null) = GradientDrawable().apply {
     setColor(color)
@@ -150,8 +159,8 @@ private fun markerBitmap(shape: Int, color: Int): Bitmap {
 
 // ---------- Fundo com grade ----------
 
-class GridView(ctx: Context) : View(ctx) {
-    private val paint = Paint().apply { color = 0x1E2EA8FF; strokeWidth = 1f }
+class GridView(ctx: Context, lineColor: Int) : View(ctx) {
+    private val paint = Paint().apply { color = lineColor; strokeWidth = 1f }
 
     override fun onDraw(canvas: Canvas) {
         val step = context.pxF(40f)
@@ -177,7 +186,7 @@ class SpeedArcView(ctx: Context) : View(ctx) {
             invalidate()
         }
 
-    var accent: Int = BLUE
+    var arcColor: Int = BLUE
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -209,7 +218,7 @@ class SpeedArcView(ctx: Context) : View(ctx) {
             arcPaint.color = when {
                 speed > 120f -> RED
                 speed > 80f -> YELLOW
-                else -> accent
+                else -> arcColor
             }
             canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
         }
@@ -257,11 +266,19 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var controller: MediaController? = null
 
-    // Escolhas do usuário, aplicadas ao montar a tela
+    // Cores (carregadas das Configurações)
     private var accent = BLUE
-    private var arcColor = BLUE
-    private var numColor = Color.WHITE
-    private var unitColor = GRAY
+    private var cArc = BLUE
+    private var cNum = Color.WHITE
+    private var cUnit = GRAY
+    private var cLabel = GRAY
+    private var cClock = BLUE_LIGHT
+    private var cStat = Color.WHITE
+    private var cCard = 0xCC0C1B33.toInt()
+    private var cBorder = BORDER
+    private var cGrid = 0x1E2EA8FF
+    private var cBgCustom = 0
+
     private var units = 0
     private var appliedVer = -1
 
@@ -282,8 +299,9 @@ class MainActivity : Activity() {
     private var locationStarted = false
     private var firstFixDone = false
 
-    // Player flutuante (arrastável)
+    // Player flutuante: o botão e o painel formam um bloco que se arrasta junto
     private var musicOpen = false
+    private lateinit var musicDock: LinearLayout
     private lateinit var musicFab: Button
     private lateinit var musicPopup: LinearLayout
     private var fabDX = 0f
@@ -415,12 +433,12 @@ class MainActivity : Activity() {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
-    // Toque no botão ♪: arrastar move o botão; um toque simples abre ou fecha o player
-    private val fabTouch = View.OnTouchListener { v, e ->
+    // Toque no botão ♪: arrastar move o bloco inteiro; um toque simples abre ou fecha o player
+    private val fabTouch = View.OnTouchListener { _, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                fabDX = v.translationX - e.rawX
-                fabDY = v.translationY - e.rawY
+                fabDX = musicDock.translationX - e.rawX
+                fabDY = musicDock.translationY - e.rawY
                 fabDownX = e.rawX
                 fabDownY = e.rawY
                 fabMoved = false
@@ -428,28 +446,19 @@ class MainActivity : Activity() {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (abs(e.rawX - fabDownX) > 12 || abs(e.rawY - fabDownY) > 12) fabMoved = true
-                if (fabMoved) {
-                    val parent = v.parent as? View
-                    val minX = -((parent?.width ?: 0) - v.width).toFloat()
-                    val minY = -((parent?.height ?: 0) - v.height).toFloat()
-                    val maxX = px(16).toFloat()
-                    val maxY = px(16).toFloat()
-                    v.translationX = (e.rawX + fabDX).coerceIn(minX, maxX)
-                    v.translationY = (e.rawY + fabDY).coerceIn(minY, maxY)
-                }
+                if (fabMoved) applyDockPos(e.rawX + fabDX, e.rawY + fabDY)
                 true
             }
             MotionEvent.ACTION_UP -> {
                 if (fabMoved) {
-                    Prefs.putRaw(this, "fab_x", v.translationX.roundToInt())
-                    Prefs.putRaw(this, "fab_y", v.translationY.roundToInt())
+                    Prefs.putRaw(this@MainActivity, "fab_x", musicDock.translationX.roundToInt())
+                    Prefs.putRaw(this@MainActivity, "fab_y", musicDock.translationY.roundToInt())
                 } else {
-                    v.performClick()
+                    musicFab.performClick()
                 }
                 true
             }
-            MotionEvent.ACTION_CANCEL -> true
-            else -> false
+            else -> true
         }
     }
 
@@ -570,12 +579,71 @@ class MainActivity : Activity() {
             locationStarted = true
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
         }
-        setGps("● GPS: aguardando sinal", GRAY)
+        setGps("● GPS: aguardando sinal", cLabel)
     }
 
     private fun setGps(text: String, color: Int) {
         gpsView.text = text
         gpsView.setTextColor(color)
+    }
+
+    // ---------- Cores ----------
+
+    // Lê todas as cores escolhidas nas Configurações
+    private fun loadColors() {
+        accent = Prefs.accentColor(this)
+        cLabel = Prefs.colorOf(this, "label_c", GRAY)
+        cClock = Prefs.colorOf(this, "clock_c", BLUE_LIGHT)
+        cStat = Prefs.colorOf(this, "stat_c", Color.WHITE)
+        cArc = Prefs.colorOf(this, "arc_color", accent)
+        cNum = Prefs.colorOf(this, "num_color", Color.WHITE)
+        cUnit = Prefs.colorOf(this, "unit_color", cLabel)
+        cCard = withAlpha(Prefs.colorOf(this, "card_c", 0xFF0C1B33.toInt()), 0xCC)
+        cBorder = withAlpha(accent, 0x80)
+        cGrid = withAlpha(Prefs.colorOf(this, "grid_c", BLUE), 0x1E)
+        cBgCustom = Prefs.colorOf(this, "bg_c", 0)
+        units = Prefs.getInt(this, "units")
+        appliedVer = Prefs.version(this)
+    }
+
+    // Fundo: cor personalizada se o usuário escolheu, senão o plano de fundo escolhido
+    private fun bgDrawable(style: Int): GradientDrawable {
+        val pair: Pair<Int, Int> = if (cBgCustom != 0) {
+            Pair(cBgCustom, shade(cBgCustom, 0.35f))
+        } else when (style) {
+            1 -> Pair(0xFF000000.toInt(), 0xFF000000.toInt())
+            2 -> Pair(0xFF0B3A6E.toInt(), 0xFF02060F.toInt())
+            3 -> Pair(0xFF3A1B6E.toInt(), 0xFF06040F.toInt())
+            else -> Pair(0xFF06142B.toInt(), 0xFF02060F.toInt())
+        }
+        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(pair.first, pair.second))
+    }
+
+    // ---------- Player flutuante (bloco arrastável) ----------
+
+    // Mantém o bloco dentro da tela
+    private fun clampDock(x: Float, y: Float): Pair<Float, Float> {
+        val parent = musicDock.parent as? View ?: return Pair(x, y)
+        val m = px(16).toFloat()
+        val minX = -(parent.width - m - musicDock.width)
+        val minY = -(parent.height - m - musicDock.height)
+        val cx = x.coerceIn(minOf(minX, m), m)
+        val cy = y.coerceIn(minOf(minY, m), m)
+        return Pair(cx, cy)
+    }
+
+    private fun applyDockPos(x: Float, y: Float) {
+        val (cx, cy) = clampDock(x, y)
+        musicDock.translationX = cx
+        musicDock.translationY = cy
+    }
+
+    private fun toggleMusic() {
+        musicOpen = !musicOpen
+        musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
+        musicFab.text = if (musicOpen) "✕" else "♪"
+        // Ao abrir, o painel cresce para cima: reajusta para não sair da tela
+        musicDock.post { applyDockPos(musicDock.translationX, musicDock.translationY) }
     }
 
     // ---------- Mapa: criação, estilo e camadas ----------
@@ -769,14 +837,7 @@ class MainActivity : Activity() {
         showMap = map
         panelScreen.visibility = if (map) View.GONE else View.VISIBLE
         mapScreen.visibility = if (map) View.VISIBLE else View.GONE
-        musicFab.visibility = if (map) View.GONE else View.VISIBLE
-        musicPopup.visibility = if (map || !musicOpen) View.GONE else View.VISIBLE
-    }
-
-    private fun toggleMusic() {
-        musicOpen = !musicOpen
-        musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
-        musicFab.text = if (musicOpen) "✕" else "♪"
+        musicDock.visibility = if (map) View.GONE else View.VISIBLE
     }
 
     // ---------- Navegação ----------
@@ -984,7 +1045,7 @@ class MainActivity : Activity() {
 
     private fun getText(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.setRequestProperty("User-Agent", "PainelMotoApp/1.0 (uso pessoal)")
+        conn.setRequestProperty("User-Agent", "RavoApp/1.1 (uso pessoal)")
         conn.connectTimeout = 10000
         conn.readTimeout = 15000
         return conn.inputStream.bufferedReader().use { it.readText() }
@@ -1097,6 +1158,14 @@ class MainActivity : Activity() {
         }
     }
 
+    // Valor de estatística: uma linha só, com o texto diminuindo para caber
+    private fun statValue(text: String): TextView =
+        label(20f, cStat, bold = true, mono = true, align = Gravity.CENTER).apply {
+            this.text = text
+            maxLines = 1
+            setAutoSizeTextTypeUniformWithConfiguration(10, 22, 1, TypedValue.COMPLEX_UNIT_SP)
+        }
+
     private fun pill(caption: String, bg: Int, fg: Int, sizeSp: Float = 16f): Button = Button(this).apply {
         text = caption
         textSize = sizeSp
@@ -1124,9 +1193,9 @@ class MainActivity : Activity() {
     private fun statCard(title: String, value: TextView): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
-        background = box(context, CARD_BG, 14, BORDER)
+        background = box(context, cCard, 14, cBorder)
         setPadding(px(6), px(8), px(6), px(8))
-        addView(label(11f, GRAY, align = Gravity.CENTER).apply { text = title })
+        addView(label(11f, cLabel, align = Gravity.CENTER).apply { text = title })
         addView(value, LinearLayout.LayoutParams(MATCH, WRAP))
     }
 
@@ -1136,56 +1205,32 @@ class MainActivity : Activity() {
         modeBtns.clear()
 
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-        // Lê as escolhas salvas na tela de Configurações
-        accent = Prefs.accentColor(this)
-        arcColor = Prefs.colorOf(this, "arc_color", BLUE)
-        numColor = Prefs.colorOf(this, "num_color", Color.WHITE)
-        unitColor = Prefs.colorOf(this, "unit_color", GRAY)
-        units = Prefs.getInt(this, "units")
-        appliedVer = Prefs.version(this)
+        loadColors()
         val bgStyle = Prefs.getInt(this, "bg")
 
-        val frame = FrameLayout(this).apply {
-            background = when (bgStyle) {
-                1 -> GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt())
-                )
-                2 -> GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0xFF0B3A6E.toInt(), 0xFF02060F.toInt())
-                )
-                3 -> GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0xFF3A1B6E.toInt(), 0xFF06040F.toInt())
-                )
-                else -> GradientDrawable(
-                    GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0xFF06142B.toInt(), 0xFF02060F.toInt())
-                )
-            }
-        }
-        if (bgStyle == 0) frame.addView(GridView(this), FrameLayout.LayoutParams(MATCH, MATCH))
+        val frame = FrameLayout(this).apply { background = bgDrawable(bgStyle) }
+        if (bgStyle == 0) frame.addView(GridView(this, cGrid), FrameLayout.LayoutParams(MATCH, MATCH))
 
         panelScreen = buildPanel(landscape)
         mapScreen = buildMapScreen()
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // Player: painel que abre (acima do botão) e botão flutuante arrastável
+        // Player: bloco arrastável no canto (painel em cima, botão embaixo)
         frame.addView(
-            musicPopup,
-            FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply {
-                setMargins(px(12), 0, px(12), px(84))
-            }
-        )
-        frame.addView(
-            musicFab,
-            FrameLayout.LayoutParams(px(56), px(56), Gravity.END or Gravity.BOTTOM).apply {
+            musicDock,
+            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.END or Gravity.BOTTOM).apply {
                 setMargins(0, 0, px(16), px(16))
             }
         )
+
+        // Restaura a posição salva do player
+        musicDock.post {
+            applyDockPos(
+                Prefs.getInt(this, "fab_x").toFloat(),
+                Prefs.getInt(this, "fab_y").toFloat()
+            )
+        }
 
         setScreen(showMap)
         return frame
@@ -1207,9 +1252,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        clockView = label(20f, BLUE_LIGHT, bold = true, mono = true)
-        gpsView = label(12f, GRAY, align = Gravity.CENTER)
-        dateView = label(12f, GRAY, align = Gravity.END)
+        clockView = label(20f, cClock, bold = true, mono = true)
+        gpsView = label(12f, cLabel, align = Gravity.CENTER)
+        dateView = label(12f, cLabel, align = Gravity.END)
         topBar.addView(clockView, LinearLayout.LayoutParams(0, WRAP, 1f))
         topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
         topBar.addView(dateView, LinearLayout.LayoutParams(0, WRAP, 1f))
@@ -1223,19 +1268,19 @@ class MainActivity : Activity() {
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap(false)
         minimap.alpha = 0.35f
-        arcView = SpeedArcView(this).apply { this.accent = this@MainActivity.arcColor }
+        arcView = SpeedArcView(this).apply { arcColor = cArc }
         arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1
         speedView = label(
             if (digital) (if (landscape) 110f else 120f) else (if (landscape) 64f else 84f),
-            numColor,
+            cNum,
             bold = true,
             align = Gravity.CENTER
         ).apply {
             text = "0"
             maxLines = 1
         }
-        unitView = label(16f, unitColor, align = Gravity.CENTER).apply { text = unitSpeed() }
+        unitView = label(16f, cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -1249,42 +1294,44 @@ class MainActivity : Activity() {
         }
 
         // Linha de navegação: fica numa linha só e desliza se for longa
-        navView = label(15f, BLUE_LIGHT, bold = true, align = Gravity.CENTER).apply {
+        navView = label(15f, cClock, bold = true, align = Gravity.CENTER).apply {
             visibility = View.GONE
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.MARQUEE
             isSelected = true
         }
 
-        // Cartões de estatística (valores sempre em uma linha)
-        val statSize = if (landscape) 16f else 20f
-        distView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
-            text = distText(0.0)
-            maxLines = 1
+        // Estatísticas: na paisagem ficam empilhadas ao lado do mapa; na vertical, lado a lado
+        distView = statValue(distText(0.0))
+        timeView = statValue("00:00:00")
+        maxView = statValue("0")
+        val statsBox = LinearLayout(this).apply {
+            orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         }
-        timeView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
-            text = "00:00:00"
-            maxLines = 1
+        listOf(
+            Pair("VIAGEM", distView),
+            Pair("TEMPO", timeView),
+            Pair("MÁX.", maxView)
+        ).forEach { (title, value) ->
+            val card = statCard(title, value)
+            val lp = if (landscape) {
+                LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, px(4), 0, px(4)) }
+            } else {
+                LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) }
+            }
+            statsBox.addView(card, lp)
         }
-        maxView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
-            text = "0"
-            maxLines = 1
-        }
-        val statsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        statsRow.addView(statCard("VIAGEM", distView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
-        statsRow.addView(statCard("TEMPO", timeView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
-        statsRow.addView(statCard("MÁX.", maxView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
         // Botões da viagem
         tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f)
         tripBtn.setOnClickListener { toggleTrip() }
-        val resetBtn = pill("Zerar", BTN_BG, GRAY, 15f)
+        val resetBtn = pill("Zerar", BTN_BG, cLabel, 15f)
         resetBtn.setOnClickListener { resetTrip() }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
         tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Player: capa, título e artista (versão menor)
+        // Player: capa, título e artista
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1298,7 +1345,7 @@ class MainActivity : Activity() {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        artistView = label(12f, GRAY).apply {
+        artistView = label(12f, cLabel).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -1316,7 +1363,7 @@ class MainActivity : Activity() {
         card.addView(textCol, LinearLayout.LayoutParams(0, WRAP, 1f))
         card.addView(eqView, LinearLayout.LayoutParams(px(32), px(24)))
 
-        // Controles de música (versão menor)
+        // Controles de música
         val prevBtn = pill("⏮", BTN_BG, Color.WHITE, 18f)
         prevBtn.setOnClickListener { control { it.skipToPrevious() } }
         playBtn = pill("▶", accent, Color.BLACK, 22f)
@@ -1332,17 +1379,17 @@ class MainActivity : Activity() {
         controls.addView(playBtn, LinearLayout.LayoutParams(0, px(48), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
         controls.addView(nextBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Painel do player, escondido até tocar no botão ♪
+        // Painel do player (escondido até tocar no botão ♪)
         musicPopup = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = box(context, CARD_BG, 18, BORDER)
+            background = box(context, cCard, 18, cBorder)
             setPadding(px(10), px(10), px(10), px(10))
             visibility = if (musicOpen) View.VISIBLE else View.GONE
             addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(controls, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
         }
 
-        // Botão flutuante ♪ / ✕ (arrastável; a posição fica salva)
+        // Botão flutuante ♪ / ✕
         musicFab = Button(this).apply {
             text = if (musicOpen) "✕" else "♪"
             textSize = 22f
@@ -1354,10 +1401,25 @@ class MainActivity : Activity() {
             minimumHeight = 0
             setPadding(0, 0, 0, 0)
             setOnClickListener { toggleMusic() }
+            setOnTouchListener(fabTouch)
         }
-        musicFab.translationX = Prefs.getInt(this, "fab_x").toFloat()
-        musicFab.translationY = Prefs.getInt(this, "fab_y").toFloat()
-        musicFab.setOnTouchListener(fabTouch)
+
+        // Bloco do player: painel em cima e botão embaixo, sempre alinhados à direita
+        musicDock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+        }
+        musicDock.addView(
+            musicPopup,
+            LinearLayout.LayoutParams(px(280), WRAP).apply {
+                gravity = Gravity.END
+                bottomMargin = px(8)
+            }
+        )
+        musicDock.addView(
+            musicFab,
+            LinearLayout.LayoutParams(px(56), px(56)).apply { gravity = Gravity.END }
+        )
 
         // Botões pequenos: mapa, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("🗺")
@@ -1385,7 +1447,7 @@ class MainActivity : Activity() {
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
         if (landscape) {
-            // Paisagem: mapa maior à esquerda, dados à direita
+            // Paisagem: mapa maior à esquerda, dados empilhados à direita (ocupam a altura toda)
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
             left.addView(vehicleView, gap(0))
@@ -1393,7 +1455,7 @@ class MainActivity : Activity() {
 
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             right.addView(navView, gap(0))
-            right.addView(statsRow, gap(4))
+            right.addView(statsBox, gap(4))
             right.addView(tripRow, gap(8))
             right.addView(navRow, gap(10))
 
@@ -1408,8 +1470,10 @@ class MainActivity : Activity() {
             root.addView(vehicleView, gap(0))
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
             root.addView(navView, gap(4))
-            root.addView(statsRow, gap(8))
+            root.addView(statsBox, gap(8))
             root.addView(tripRow, gap(8))
+            root.addView(card, gap(12))
+            root.addView(controls, gap(12))
             root.addView(navRow, gap(10))
         }
         return root
@@ -1466,7 +1530,7 @@ class MainActivity : Activity() {
 
         // Cartão de instruções
         mapInstructionView = label(22f, Color.WHITE, bold = true).apply { text = "Digite um destino acima" }
-        mapInfoView = label(15f, BLUE_LIGHT)
+        mapInfoView = label(15f, cClock)
         voiceBtn = Button(this).apply { text = if (voiceOn) "Voz: ligada" else "Voz: desligada" }
         voiceBtn.setOnClickListener {
             voiceOn = !voiceOn
@@ -1480,11 +1544,11 @@ class MainActivity : Activity() {
         val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         btnRow.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
         btnRow.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val attrib = label(10f, GRAY).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
+        val attrib = label(10f, cLabel).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(CARD_BG)
+            setBackgroundColor(cCard)
             setPadding(px(16), px(12), px(16), px(12))
             addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
