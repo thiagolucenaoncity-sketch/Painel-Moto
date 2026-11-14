@@ -45,15 +45,25 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
-import org.osmdroid.config.Configuration as OsmConfiguration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillExtrusionLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -62,6 +72,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.Random
 import kotlin.math.roundToInt
+
+// ---------- Constantes ----------
+
+private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 
 // ---------- Cores e helpers ----------
 
@@ -90,7 +105,7 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
 
 private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
 
-// Desenha o ícone da sua posição no mapa, de acordo com a escolha do usuário
+// Desenha o ícone da sua posição, de acordo com a escolha do usuário
 private fun markerBitmap(shape: Int, color: Int): Bitmap {
     val bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
@@ -248,11 +263,19 @@ class MainActivity : Activity() {
     // Orientação: 0 = automático, 1 = paisagem fixa, 2 = retrato fixo
     private var orientMode = 0
 
-    // Mapas (miniatura no painel + mapa completo) e seus overlays de localização
-    private val maps = ArrayList<MapView>()
-    private val myOverlays = ArrayList<MyLocationNewOverlay>()
+    // Mapa 3D (inclinado com prédios) ou 2D (visão de cima)
+    private var is3D = false
+    private val modeBtns = ArrayList<Button>()
+
+    // Seguir a posição: fica falso quando o usuário arrasta o mapa
+    private var followMe = true
+
+    // Todos os mapas (miniatura e mapa completo)
+    private val holders = ArrayList<MapHolder>()
+
     private var showMap = false
     private var locationStarted = false
+    private var firstFixDone = false
 
     // Player flutuante
     private var musicOpen = false
@@ -296,8 +319,8 @@ class MainActivity : Activity() {
     private var steps: List<Step> = emptyList()
     private var stepIndex = 0
     private var announcedNear = false
-    private var routePoints: List<GeoPoint> = emptyList()
-    private var routeDest: GeoPoint? = null
+    private var routePoints: List<LatLng> = emptyList()
+    private var routeDest: LatLng? = null
     private var routeName = ""
 
     // Viagem (valores internos sempre em km/h e metros)
@@ -361,8 +384,17 @@ class MainActivity : Activity() {
                 distView.text = distText(totalM)
             }
             tripLast = loc
-
             lastFix = loc
+
+            // Primeira localização: já posiciona o mapa
+            if (!firstFixDone) {
+                firstFixDone = true
+                followMe = true
+                holders.forEach { followCamera(it, loc, false) }
+            } else if (followMe) {
+                holders.forEach { followCamera(it, loc, true) }
+            }
+            holders.forEach { updateMeMarker(it, loc) }
             onFix(loc)
         }
 
@@ -373,13 +405,39 @@ class MainActivity : Activity() {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
+    // Um mapa: MapView + estilo + camadas (posição, rota, destino e prédios 3D)
+    private inner class MapHolder(val interactive: Boolean) {
+        val view: MapView = MapView(this@MainActivity)
+        var map: MapLibreMap? = null
+        var style: Style? = null
+        var meSrc: GeoJsonSource? = null
+        var routeSrc: GeoJsonSource? = null
+        var destSrc: GeoJsonSource? = null
+        var buildings: FillExtrusionLayer? = null
+
+        init {
+            view.onCreate(null)
+            view.onStart()
+            view.onResume()
+            view.getMapAsync { m ->
+                map = m
+                m.uiSettings.setAllGesturesEnabled(interactive)
+                if (interactive) {
+                    m.addOnCameraMoveStartedListener { reason ->
+                        if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                            followMe = false
+                        }
+                    }
+                }
+                m.setStyle(Style.Builder().fromUri(STYLE_URL)) { s -> onStyleReady(this, s) }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        OsmConfiguration.getInstance().apply {
-            load(this@MainActivity, getSharedPreferences("osmdroid", MODE_PRIVATE))
-            userAgentValue = packageName
-        }
+        MapLibre.getInstance(this)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 val r = tts?.setLanguage(Locale("pt", "BR"))
@@ -412,6 +470,11 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        holders.forEach { it.view.onStart() }
+    }
+
     override fun onResume() {
         super.onResume()
         // Se mudou alguma configuração na tela de Configurações, redesenha a tela principal
@@ -419,7 +482,7 @@ class MainActivity : Activity() {
             setContentView(buildUi())
             updateMedia()
         }
-        maps.forEach { it.onResume() }
+        holders.forEach { it.view.onResume() }
         handler.post(tick)
         handler.post(pollSessions)
         handler.post(eqTick)
@@ -427,15 +490,30 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        maps.forEach { it.onPause() }
+        holders.forEach { it.view.onPause() }
         handler.removeCallbacksAndMessages(null)
+    }
+
+    override fun onStop() {
+        holders.forEach { it.view.onStop() }
+        super.onStop()
     }
 
     override fun onDestroy() {
         locationManager.removeUpdates(locationListener)
         controller?.unregisterCallback(mediaCallback)
         tts?.shutdown()
+        destroyHolders()
         super.onDestroy()
+    }
+
+    private fun destroyHolders() {
+        holders.forEach {
+            it.view.onPause()
+            it.view.onStop()
+            it.view.onDestroy()
+        }
+        holders.clear()
     }
 
     @SuppressLint("MissingPermission")
@@ -444,21 +522,170 @@ class MainActivity : Activity() {
             locationStarted = true
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener)
         }
-        enableOverlays()
         setGps("● GPS: aguardando sinal", GRAY)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun enableOverlays() {
-        myOverlays.forEach {
-            it.enableMyLocation()
-            it.enableFollowLocation()
-        }
     }
 
     private fun setGps(text: String, color: Int) {
         gpsView.text = text
         gpsView.setTextColor(color)
+    }
+
+    // ---------- Mapa: criação, estilo e camadas ----------
+
+    private fun newMap(interactive: Boolean): MapView {
+        val h = MapHolder(interactive)
+        holders.add(h)
+        return h.view
+    }
+
+    private fun onStyleReady(h: MapHolder, s: Style) {
+        h.style = s
+        s.addImage("me-icon", markerBitmap(Prefs.getInt(this, "marker"), accent))
+
+        val rs = GeoJsonSource("route-src")
+        val ds = GeoJsonSource("dest-src")
+        val ms = GeoJsonSource("me-src")
+        h.routeSrc = rs
+        h.destSrc = ds
+        h.meSrc = ms
+        s.addSource(rs)
+        s.addSource(ds)
+        s.addSource(ms)
+
+        // Prédios em 3D (camada extra por cima do mapa)
+        try {
+            val b = FillExtrusionLayer("building-3d", "openmaptiles")
+                .withSourceLayer("building")
+                .withProperties(
+                    PropertyFactory.fillExtrusionHeight(Expression.get("render_height")),
+                    PropertyFactory.fillExtrusionBase(Expression.get("render_min_height")),
+                    PropertyFactory.fillExtrusionColor(0xFF2A3F63.toInt()),
+                    PropertyFactory.fillExtrusionOpacity(0.9f),
+                    PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE)
+                )
+            s.addLayer(b)
+            h.buildings = b
+        } catch (e: Exception) {
+            // Se o estilo não tiver a camada de prédios, o mapa continua em 2D
+        }
+
+        s.addLayer(
+            LineLayer("route-layer", "route-src").withProperties(
+                PropertyFactory.lineColor(accent),
+                PropertyFactory.lineWidth(8f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("dest-layer", "dest-src").withProperties(
+                PropertyFactory.circleColor(accent),
+                PropertyFactory.circleRadius(9f),
+                PropertyFactory.circleStrokeColor(Color.WHITE),
+                PropertyFactory.circleStrokeWidth(2f)
+            )
+        )
+        s.addLayer(
+            SymbolLayer("me-layer", "me-src").withProperties(
+                PropertyFactory.iconImage("me-icon"),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true),
+                PropertyFactory.iconRotate(Expression.get("bearing"))
+            )
+        )
+
+        refreshRoute(h)
+        lastFix?.let { loc ->
+            updateMeMarker(h, loc)
+            followCamera(h, loc, false)
+        }
+        // Garante que o mapa já abre na inclinação escolhida
+        h.map?.let { m ->
+            m.easeCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
+                )
+            )
+        }
+    }
+
+    // Posiciona a câmera sobre você. Em 3D, o mapa gira com a direção do movimento.
+    private fun followCamera(h: MapHolder, loc: Location, animate: Boolean) {
+        val m = h.map ?: return
+        val zoom = if (h.interactive) 17.0 else 16.0
+        val bearing = when {
+            !is3D -> 0.0
+            loc.hasBearing() && loc.speed > 1f -> loc.bearing.toDouble()
+            else -> m.cameraPosition.bearing
+        }
+        val pos = CameraPosition.Builder()
+            .target(LatLng(loc.latitude, loc.longitude))
+            .zoom(zoom)
+            .tilt(if (is3D) 60.0 else 0.0)
+            .bearing(bearing)
+            .build()
+        if (animate) {
+            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 800)
+        } else {
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
+        }
+    }
+
+    private fun updateMeMarker(h: MapHolder, loc: Location) {
+        val src = h.meSrc ?: return
+        val f = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
+        val heading = if (loc.hasBearing() && loc.speed > 1f) loc.bearing.toDouble() else 0.0
+        f.addNumberProperty("bearing", heading)
+        src.setGeoJson(f)
+    }
+
+    private fun refreshRoute(h: MapHolder) {
+        val rs = h.routeSrc ?: return
+        val ds = h.destSrc ?: return
+        if (routePoints.size < 2) {
+            rs.setGeoJson(EMPTY_GEO)
+        } else {
+            val pts = routePoints.map { Point.fromLngLat(it.longitude, it.latitude) }
+            rs.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(pts)))
+        }
+        val d = routeDest
+        if (d == null) {
+            ds.setGeoJson(EMPTY_GEO)
+        } else {
+            ds.setGeoJson(Feature.fromGeometry(Point.fromLngLat(d.longitude, d.latitude)))
+        }
+    }
+
+    // Alterna entre visão 2D (de cima) e 3D (inclinada, com prédios)
+    private fun toggle3D() {
+        is3D = !is3D
+        holders.forEach { h ->
+            h.buildings?.setProperties(PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE))
+            val m = h.map
+            if (m != null) {
+                if (followMe) {
+                    lastFix?.let { followCamera(h, it, true) }
+                } else {
+                    m.easeCamera(
+                        CameraUpdateFactory.newCameraPosition(
+                            CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
+                        )
+                    )
+                }
+            }
+        }
+        modeBtns.forEach { it.text = modeLabel() }
+    }
+
+    private fun modeLabel(): String = if (is3D) "2D" else "3D"
+
+    // Centraliza o mapa completo na sua posição e volta a seguir
+    private fun recenter() {
+        val loc = lastFix
+        if (loc == null) {
+            toast("Aguardando sinal do GPS...")
+            return
+        }
+        followMe = true
+        holders.forEach { followCamera(it, loc, true) }
     }
 
     // ---------- Orientação ----------
@@ -496,23 +723,6 @@ class MainActivity : Activity() {
         mapScreen.visibility = if (map) View.VISIBLE else View.GONE
         musicFab.visibility = if (map) View.GONE else View.VISIBLE
         musicPopup.visibility = if (map || !musicOpen) View.GONE else View.VISIBLE
-    }
-
-    private fun newMap(): MapView {
-        val m = MapView(this).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
-            setMultiTouchControls(true)
-            controller.setZoom(16.0)
-        }
-        val my = MyLocationNewOverlay(GpsMyLocationProvider(this), m)
-        val icon = markerBitmap(Prefs.getInt(this, "marker"), accent)
-        my.setPersonIcon(icon)
-        my.setDirectionIcon(icon)
-        m.overlays.add(my)
-        myOverlays.add(my)
-        maps.add(m)
-        drawRoute(m)
-        return m
     }
 
     // ---------- Navegação ----------
@@ -590,10 +800,10 @@ class MainActivity : Activity() {
 
                 val route = res.getJSONArray("routes").getJSONObject(0)
                 val coords = route.getJSONObject("geometry").getJSONArray("coordinates")
-                val points = ArrayList<GeoPoint>()
+                val points = ArrayList<LatLng>()
                 for (i in 0 until coords.length()) {
                     val c = coords.getJSONArray(i)
-                    points.add(GeoPoint(c.getDouble(1), c.getDouble(0)))
+                    points.add(LatLng(c.getDouble(1), c.getDouble(0)))
                 }
 
                 val list = ArrayList<Step>()
@@ -618,7 +828,7 @@ class MainActivity : Activity() {
                 val total = route.getDouble("distance")
                 val dur = route.getDouble("duration")
                 handler.post {
-                    showRoute(points, list, GeoPoint(destLat, destLon), name, total, dur)
+                    showRoute(points, list, LatLng(destLat, destLon), name, total, dur)
                 }
             } catch (e: Exception) {
                 handler.post { toast("Não consegui calcular a rota. Verifique a internet.") }
@@ -627,9 +837,9 @@ class MainActivity : Activity() {
     }
 
     private fun showRoute(
-        points: List<GeoPoint>,
+        points: List<LatLng>,
         list: List<Step>,
-        dest: GeoPoint,
+        dest: LatLng,
         name: String,
         totalM: Double,
         durS: Double
@@ -642,11 +852,15 @@ class MainActivity : Activity() {
         // O primeiro passo começa no seu ponto atual, então pulamos ele
         stepIndex = if (list.size > 1) 1 else 0
 
-        maps.forEach {
-            clearRouteFrom(it)
-            drawRoute(it)
+        holders.forEach { refreshRoute(it) }
+
+        // Mostra a rota inteira no mapa grande (para de seguir até você tocar em ◎)
+        followMe = false
+        val full = holders.firstOrNull { it.interactive }?.map
+        if (full != null && points.size > 1) {
+            val bounds = LatLngBounds.Builder().includes(points).build()
+            full.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 120))
         }
-        fullMap.zoomToBoundingBox(BoundingBox.fromGeoPoints(points), true, 100)
 
         if (list.isNotEmpty()) {
             val first = list[stepIndex]
@@ -660,36 +874,11 @@ class MainActivity : Activity() {
         routeDest = null
         steps = emptyList()
         stepIndex = 0
-        maps.forEach {
-            clearRouteFrom(it)
-            it.invalidate()
-        }
+        holders.forEach { refreshRoute(it) }
         mapInstructionView.text = "Digite um destino acima"
         mapInfoView.text = ""
         navView.text = ""
         navView.visibility = View.GONE
-    }
-
-    private fun drawRoute(m: MapView) {
-        val dest = routeDest ?: return
-        if (routePoints.isEmpty()) return
-        val line = Polyline().apply {
-            setPoints(routePoints)
-            outlinePaint.color = accent
-            outlinePaint.strokeWidth = 10f
-        }
-        val marker = Marker(m).apply {
-            position = dest
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            title = routeName
-        }
-        m.overlays.add(line)
-        m.overlays.add(marker)
-        m.invalidate()
-    }
-
-    private fun clearRouteFrom(m: MapView) {
-        m.overlays.removeAll { it is Polyline || it is Marker }
     }
 
     // Traduz a manobra do OSRM para uma frase em português
@@ -887,6 +1076,10 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi(): FrameLayout {
+        // Desfaz os mapas antigos antes de montar a tela de novo
+        destroyHolders()
+        modeBtns.clear()
+
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         // Lê as escolhas salvas na tela de Configurações
@@ -894,8 +1087,6 @@ class MainActivity : Activity() {
         units = Prefs.getInt(this, "units")
         appliedVer = Prefs.version(this)
         val bgStyle = Prefs.getInt(this, "bg")
-        maps.clear()
-        myOverlays.clear()
 
         val frame = FrameLayout(this).apply {
             background = when (bgStyle) {
@@ -939,7 +1130,6 @@ class MainActivity : Activity() {
         )
 
         setScreen(showMap)
-        if (locationStarted) enableOverlays()
         return frame
     }
 
@@ -973,7 +1163,7 @@ class MainActivity : Activity() {
         }
 
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
-        minimap = newMap()
+        minimap = newMap(false)
         minimap.alpha = 0.35f
         arcView = SpeedArcView(this).apply { this.accent = this@MainActivity.accent }
         arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
@@ -1096,11 +1286,14 @@ class MainActivity : Activity() {
             }
         }
 
-        // Botões pequenos: mapa, configurações e rotação
+        // Botões pequenos: mapa, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("🗺")
         mapBtn.setOnClickListener { setScreen(true) }
         val settingsBtn = miniBtn("⚙")
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        val mode3dBtn = miniBtn(modeLabel())
+        modeBtns.add(mode3dBtn)
+        mode3dBtn.setOnClickListener { toggle3D() }
         val rotateBtn = miniBtn(orientLabel())
         rotateBtn.setOnClickListener {
             orientMode = (orientMode + 1) % 3
@@ -1111,9 +1304,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
-        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
-        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(56), px(44)).apply { setMargins(px(6), 0, px(6), 0) })
+        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        navRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
@@ -1153,7 +1347,7 @@ class MainActivity : Activity() {
             setBackgroundColor(0xFF06142B.toInt())
         }
 
-        // Barra de busca
+        // Barra de busca, 2D/3D, centralizar (◎) e voltar ao painel
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1178,16 +1372,23 @@ class MainActivity : Activity() {
             text = "Ir"
             setOnClickListener { go() }
         }
+        val mode3dBtn = miniBtn(modeLabel())
+        modeBtns.add(mode3dBtn)
+        mode3dBtn.setOnClickListener { toggle3D() }
+        val centerBtn = miniBtn("◎")
+        centerBtn.setOnClickListener { recenter() }
         val backBtn = Button(this).apply {
             text = "Painel"
             setOnClickListener { setScreen(false) }
         }
         topRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
         topRow.addView(goBtn, LinearLayout.LayoutParams(WRAP, WRAP))
+        topRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        topRow.addView(centerBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
         topRow.addView(backBtn, LinearLayout.LayoutParams(WRAP, WRAP))
 
         // Mapa completo
-        fullMap = newMap()
+        fullMap = newMap(true)
 
         // Cartão de instruções
         mapInstructionView = label(22f, Color.WHITE, bold = true).apply { text = "Digite um destino acima" }
@@ -1205,7 +1406,7 @@ class MainActivity : Activity() {
         val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         btnRow.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
         btnRow.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val attrib = label(10f, GRAY).apply { text = "Mapa © OpenStreetMap · Rota OSRM" }
+        val attrib = label(10f, GRAY).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
