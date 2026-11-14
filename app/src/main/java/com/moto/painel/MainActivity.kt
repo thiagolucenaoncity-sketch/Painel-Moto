@@ -8,9 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -87,6 +89,47 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
 
 private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
 
+// Desenha o ícone da sua posição no mapa, de acordo com a escolha do usuário
+private fun markerBitmap(style: Int, color: Int): Bitmap {
+    val bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.WHITE }
+    when (style) {
+        0 -> {
+            val path = Path().apply {
+                moveTo(48f, 6f); lineTo(86f, 88f); lineTo(48f, 70f); lineTo(10f, 88f); close()
+            }
+            c.drawPath(path, fill)
+            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 4f
+            })
+        }
+        1 -> {
+            c.drawCircle(22f, 72f, 15f, white)
+            c.drawCircle(74f, 72f, 15f, white)
+            c.drawCircle(22f, 72f, 9f, fill)
+            c.drawCircle(74f, 72f, 9f, fill)
+            c.drawRoundRect(RectF(26f, 40f, 70f, 60f), 8f, 8f, fill)
+            c.drawCircle(48f, 26f, 10f, fill)
+        }
+        2 -> {
+            c.drawCircle(48f, 48f, 26f, white)
+            c.drawCircle(48f, 48f, 19f, fill)
+        }
+        else -> {
+            c.drawCircle(48f, 48f, 44f, fill)
+            val arrow = Path().apply {
+                moveTo(48f, 18f); lineTo(70f, 66f); lineTo(48f, 56f); lineTo(26f, 66f); close()
+            }
+            c.drawPath(arrow, white)
+        }
+    }
+    return bmp
+}
+
 // ---------- Fundo com grade ----------
 
 class GridView(ctx: Context) : View(ctx) {
@@ -115,6 +158,8 @@ class SpeedArcView(ctx: Context) : View(ctx) {
             field = value
             invalidate()
         }
+
+    var accent: Int = BLUE
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -146,7 +191,7 @@ class SpeedArcView(ctx: Context) : View(ctx) {
             arcPaint.color = when {
                 speed > 120f -> RED
                 speed > 80f -> YELLOW
-                else -> BLUE
+                else -> accent
             }
             canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
         }
@@ -157,6 +202,12 @@ class SpeedArcView(ctx: Context) : View(ctx) {
 
 class EqualizerView(ctx: Context) : View(ctx) {
     var playing: Boolean = false
+    var tint: Int = BLUE
+        set(value) {
+            field = value
+            paint.color = value
+            invalidate()
+        }
     private val levels = FloatArray(5) { 0.15f }
     private val rnd = Random()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BLUE }
@@ -188,6 +239,11 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var controller: MediaController? = null
 
+    // Escolhas do usuário, aplicadas ao montar a tela
+    private var accent = BLUE
+    private var units = 0
+    private var appliedVer = -1
+
     // Mapas (miniatura no painel + mapa completo) e seus overlays de localização
     private val maps = ArrayList<MapView>()
     private val myOverlays = ArrayList<MyLocationNewOverlay>()
@@ -200,7 +256,9 @@ class MainActivity : Activity() {
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
     private lateinit var gpsView: TextView
+    private lateinit var vehicleView: TextView
     private lateinit var speedView: TextView
+    private lateinit var unitView: TextView
     private lateinit var arcView: SpeedArcView
     private lateinit var navView: TextView
     private lateinit var distView: TextView
@@ -233,7 +291,7 @@ class MainActivity : Activity() {
     private var routeDest: GeoPoint? = null
     private var routeName = ""
 
-    // Viagem
+    // Viagem (valores internos sempre em km/h e metros)
     private var tripLast: Location? = null
     private var totalM = 0.0
     private var maxSpeed = 0
@@ -280,10 +338,10 @@ class MainActivity : Activity() {
             val kmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
             val shown = if (kmh < 2f) 0 else kmh.roundToInt()
 
-            speedView.text = shown.toString()
+            speedView.text = speedText(shown)
             arcView.speed = shown.toFloat()
             if (shown > maxSpeed) maxSpeed = shown
-            maxView.text = maxSpeed.toString()
+            maxView.text = speedText(maxSpeed)
             setGps("● GPS ok (±${loc.accuracy.roundToInt()} m)", GREEN)
 
             if (tripRunning) {
@@ -291,7 +349,7 @@ class MainActivity : Activity() {
                     val d = prev.distanceTo(loc)
                     if (d in 3f..500f) totalM += d
                 }
-                distView.text = String.format(Locale.US, "%.2f km", totalM / 1000.0)
+                distView.text = distText(totalM)
             }
             tripLast = loc
 
@@ -329,8 +387,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // Chamado quando o celular gira. O manifesto declara configChanges, então o app não reinicia:
-    // refazemos a tela para a nova orientação, mantendo a aba em que o usuário estava.
+    // Chamado quando o celular gira (o manifesto impede o reinício do app)
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         setContentView(buildUi())
@@ -347,6 +404,11 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Se mudou alguma configuração na tela de Configurações, redesenha a tela principal
+        if (Prefs.version(this) != appliedVer) {
+            setContentView(buildUi())
+            updateMedia()
+        }
         maps.forEach { it.onResume() }
         handler.post(tick)
         handler.post(pollSessions)
@@ -389,6 +451,17 @@ class MainActivity : Activity() {
         gpsView.setTextColor(color)
     }
 
+    // ---------- Unidades ----------
+
+    private fun speedText(kmh: Int): String =
+        if (units == 1) (kmh * 0.621371).roundToInt().toString() else kmh.toString()
+
+    private fun unitSpeed(): String = if (units == 1) "mph" else "km/h"
+
+    private fun distText(m: Double): String =
+        if (units == 1) String.format(Locale.US, "%.2f mi", m / 1609.344)
+        else String.format(Locale.US, "%.2f km", m / 1000.0)
+
     // ---------- Telas ----------
 
     private fun setScreen(map: Boolean) {
@@ -404,6 +477,9 @@ class MainActivity : Activity() {
             controller.setZoom(16.0)
         }
         val my = MyLocationNewOverlay(GpsMyLocationProvider(this), m)
+        val icon = markerBitmap(Prefs.getInt(this, "marker"), accent)
+        my.setPersonIcon(icon)
+        my.setDirectionIcon(icon)
         m.overlays.add(my)
         myOverlays.add(my)
         maps.add(m)
@@ -461,8 +537,10 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val geo = JSONArray(
-                    getText("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-                        URLEncoder.encode(q, "UTF-8"))
+                    getText(
+                        "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+                            URLEncoder.encode(q, "UTF-8")
+                    )
                 )
                 if (geo.length() == 0) {
                     handler.post { toast("Endereço não encontrado") }
@@ -569,7 +647,7 @@ class MainActivity : Activity() {
         if (routePoints.isEmpty()) return
         val line = Polyline().apply {
             setPoints(routePoints)
-            outlinePaint.color = Color.parseColor("#2EA8FF")
+            outlinePaint.color = accent
             outlinePaint.strokeWidth = 10f
         }
         val marker = Marker(m).apply {
@@ -669,7 +747,7 @@ class MainActivity : Activity() {
         maxSpeed = 0
         tripLast = null
         tripBtn.text = "▶ Iniciar"
-        distView.text = "0.00 km"
+        distView.text = distText(0.0)
         maxView.text = "0"
         timeView.text = "00:00:00"
     }
@@ -769,16 +847,36 @@ class MainActivity : Activity() {
 
     private fun buildUi(): FrameLayout {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+        // Lê as escolhas salvas na tela de Configurações
+        accent = Prefs.accentColor(this)
+        units = Prefs.getInt(this, "units")
+        appliedVer = Prefs.version(this)
+        val bgStyle = Prefs.getInt(this, "bg")
         maps.clear()
         myOverlays.clear()
 
         val frame = FrameLayout(this).apply {
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xFF06142B.toInt(), 0xFF02060F.toInt())
-            )
+            background = when (bgStyle) {
+                1 -> GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt())
+                )
+                2 -> GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xFF0B3A6E.toInt(), 0xFF02060F.toInt())
+                )
+                3 -> GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xFF3A1B6E.toInt(), 0xFF06040F.toInt())
+                )
+                else -> GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(0xFF06142B.toInt(), 0xFF02060F.toInt())
+                )
+            }
         }
-        frame.addView(GridView(this), FrameLayout.LayoutParams(MATCH, MATCH))
+        if (bgStyle == 0) frame.addView(GridView(this), FrameLayout.LayoutParams(MATCH, MATCH))
 
         panelScreen = buildPanel(landscape)
         mapScreen = buildMapScreen()
@@ -791,6 +889,11 @@ class MainActivity : Activity() {
     }
 
     private fun buildPanel(landscape: Boolean): LinearLayout {
+        val gaugeStyle = Prefs.getInt(this, "gauge")
+        val vehicleName = listOf(Prefs.getStr(this, "brand"), Prefs.getStr(this, "model"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+
         val root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             setPadding(px(16), px(12), px(16), px(16))
@@ -808,12 +911,25 @@ class MainActivity : Activity() {
         topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
         topBar.addView(dateView, LinearLayout.LayoutParams(0, WRAP, 1f))
 
+        // Veículo escolhido nas Configurações (some se estiver vazio)
+        vehicleView = label(15f, accent, bold = true, align = Gravity.CENTER).apply {
+            text = vehicleName
+            visibility = if (vehicleName.isEmpty()) View.GONE else View.VISIBLE
+        }
+
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap()
         minimap.alpha = 0.35f
-        arcView = SpeedArcView(this)
-        speedView = label(if (landscape) 64f else 84f, Color.WHITE, bold = true, align = Gravity.CENTER).apply { text = "0" }
-        val unitView = label(16f, GRAY, align = Gravity.CENTER).apply { text = "km/h" }
+        arcView = SpeedArcView(this).apply { this.accent = this@MainActivity.accent }
+        arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
+        val digital = gaugeStyle == 1
+        speedView = label(
+            if (digital) (if (landscape) 110f else 120f) else (if (landscape) 64f else 84f),
+            Color.WHITE,
+            bold = true,
+            align = Gravity.CENTER
+        ).apply { text = "0" }
+        unitView = label(16f, GRAY, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -832,7 +948,7 @@ class MainActivity : Activity() {
         }
 
         // Cartões de estatística
-        distView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = "0.00 km" }
+        distView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = distText(0.0) }
         timeView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = "00:00:00" }
         maxView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = "0" }
         val statsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -841,7 +957,7 @@ class MainActivity : Activity() {
         statsRow.addView(statCard("MÁX.", maxView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
         // Botões da viagem
-        tripBtn = pill("▶ Iniciar", BLUE_DARK, Color.WHITE, 15f)
+        tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f)
         tripBtn.setOnClickListener { toggleTrip() }
         val resetBtn = pill("Zerar", BTN_BG, GRAY, 15f)
         resetBtn.setOnClickListener { resetTrip() }
@@ -878,7 +994,7 @@ class MainActivity : Activity() {
             addView(titleView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(artistView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        eqView = EqualizerView(this)
+        eqView = EqualizerView(this).apply { tint = accent }
         card.addView(artView, LinearLayout.LayoutParams(px(64), px(64)))
         card.addView(textCol, LinearLayout.LayoutParams(0, WRAP, 1f))
         card.addView(eqView, LinearLayout.LayoutParams(px(44), px(36)))
@@ -886,7 +1002,7 @@ class MainActivity : Activity() {
         // Controles de música
         val prevBtn = pill("⏮", BTN_BG, Color.WHITE, 22f)
         prevBtn.setOnClickListener { control { it.skipToPrevious() } }
-        playBtn = pill("▶", BLUE, Color.BLACK, 28f)
+        playBtn = pill("▶", accent, Color.BLACK, 28f)
         playBtn.setOnClickListener {
             control {
                 if (controller?.playbackState?.state == PlaybackState.STATE_PLAYING) it.pause() else it.play()
@@ -899,15 +1015,21 @@ class MainActivity : Activity() {
         controls.addView(playBtn, LinearLayout.LayoutParams(0, px(64), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
         controls.addView(nextBtn, LinearLayout.LayoutParams(0, px(64), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Botão para abrir o mapa completo
+        // Botões de navegação entre telas
         val mapBtn = pill("🗺  Abrir mapa", BLUE_DARK, Color.WHITE, 15f)
         mapBtn.setOnClickListener { setScreen(true) }
+        val settingsBtn = pill("⚙  Configurações", BTN_BG, Color.WHITE, 15f)
+        settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        val navRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        navRow.addView(mapBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+        navRow.addView(settingsBtn, LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
         if (landscape) {
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            left.addView(vehicleView, gap(0))
             left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -916,7 +1038,7 @@ class MainActivity : Activity() {
             right.addView(tripRow, gap(8))
             right.addView(card, gap(10))
             right.addView(controls, gap(10))
-            right.addView(mapBtn, gap(10))
+            right.addView(navRow, gap(10))
 
             val scroll = ScrollView(this).apply {
                 isFillViewport = true
@@ -926,13 +1048,14 @@ class MainActivity : Activity() {
             root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(12) })
         } else {
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            root.addView(vehicleView, gap(0))
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
             root.addView(navView, gap(4))
             root.addView(statsRow, gap(8))
             root.addView(tripRow, gap(8))
             root.addView(card, gap(12))
             root.addView(controls, gap(12))
-            root.addView(mapBtn, gap(10))
+            root.addView(navRow, gap(10))
         }
         return root
     }
