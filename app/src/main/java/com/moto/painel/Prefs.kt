@@ -16,6 +16,19 @@ object Prefs {
     val MARKER_NAMES = arrayOf("Seta", "Moto", "Ponto", "Círculo")
     val UNIT_NAMES = arrayOf("km/h e km", "mph e milhas")
 
+    // Cores extras: índice 0 = padrão do tema (mantém o visual original)
+    val COLOR_NAMES = arrayOf("Padrão", "Azul", "Branco", "Verde", "Laranja", "Vermelho", "Roxo", "Amarelo")
+    val COLOR_VALUES = intArrayOf(
+        0,
+        0xFF2EA8FF.toInt(),
+        0xFFFFFFFF.toInt(),
+        0xFF3DDC84.toInt(),
+        0xFFFF9800.toInt(),
+        0xFFFF4D4D.toInt(),
+        0xFFB388FF.toInt(),
+        0xFFFFC107.toInt()
+    )
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun getInt(ctx: Context, key: String): Int = prefs(ctx).getInt(key, 0)
@@ -24,6 +37,12 @@ object Prefs {
 
     fun accentColor(ctx: Context): Int =
         ACCENTS[getInt(ctx, "accent").coerceIn(0, ACCENTS.size - 1)]
+
+    // Devolve a cor escolhida para a chave, ou a cor padrão se o usuário deixou em "Padrão"
+    fun colorOf(ctx: Context, key: String, default: Int): Int {
+        val idx = getInt(ctx, key).coerceIn(0, COLOR_VALUES.size - 1)
+        return if (idx == 0) default else COLOR_VALUES[idx]
+    }
 
     // Salva um valor e aumenta a "versão", para a tela principal saber que precisa se redesenhar
     fun save(ctx: Context, key: String, value: Any) {
@@ -34,6 +53,11 @@ object Prefs {
         }
         e.putInt("ver", getInt(ctx, "ver") + 1)
         e.apply()
+    }
+
+    // Salva sem mexer na versão (usado para a posição do botão ♪)
+    fun putRaw(ctx: Context, key: String, value: Int) {
+        prefs(ctx).edit().putInt(key, value).apply()
     }
 
     fun version(ctx: Context): Int = getInt(ctx, "ver")
