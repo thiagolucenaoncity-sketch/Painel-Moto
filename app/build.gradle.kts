@@ -25,3 +25,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
+
+dependencies {
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+}
