@@ -31,6 +31,7 @@ import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -71,6 +72,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.Random
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // ---------- Constantes ----------
@@ -257,6 +259,9 @@ class MainActivity : Activity() {
 
     // Escolhas do usuário, aplicadas ao montar a tela
     private var accent = BLUE
+    private var arcColor = BLUE
+    private var numColor = Color.WHITE
+    private var unitColor = GRAY
     private var units = 0
     private var appliedVer = -1
 
@@ -277,10 +282,15 @@ class MainActivity : Activity() {
     private var locationStarted = false
     private var firstFixDone = false
 
-    // Player flutuante
+    // Player flutuante (arrastável)
     private var musicOpen = false
     private lateinit var musicFab: Button
     private lateinit var musicPopup: LinearLayout
+    private var fabDX = 0f
+    private var fabDY = 0f
+    private var fabDownX = 0f
+    private var fabDownY = 0f
+    private var fabMoved = false
 
     // Painel
     private lateinit var panelScreen: LinearLayout
@@ -403,6 +413,44 @@ class MainActivity : Activity() {
 
         @Suppress("OVERRIDE_DEPRECATION")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
+
+    // Toque no botão ♪: arrastar move o botão; um toque simples abre ou fecha o player
+    private val fabTouch = View.OnTouchListener { v, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                fabDX = v.translationX - e.rawX
+                fabDY = v.translationY - e.rawY
+                fabDownX = e.rawX
+                fabDownY = e.rawY
+                fabMoved = false
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (abs(e.rawX - fabDownX) > 12 || abs(e.rawY - fabDownY) > 12) fabMoved = true
+                if (fabMoved) {
+                    val parent = v.parent as? View
+                    val minX = -((parent?.width ?: 0) - v.width).toFloat()
+                    val minY = -((parent?.height ?: 0) - v.height).toFloat()
+                    val maxX = px(16).toFloat()
+                    val maxY = px(16).toFloat()
+                    v.translationX = (e.rawX + fabDX).coerceIn(minX, maxX)
+                    v.translationY = (e.rawY + fabDY).coerceIn(minY, maxY)
+                }
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (fabMoved) {
+                    Prefs.putRaw(this, "fab_x", v.translationX.roundToInt())
+                    Prefs.putRaw(this, "fab_y", v.translationY.roundToInt())
+                } else {
+                    v.performClick()
+                }
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> true
+            else -> false
+        }
     }
 
     // Um mapa: MapView + estilo + camadas (posição, rota, destino e prédios 3D)
@@ -725,6 +773,12 @@ class MainActivity : Activity() {
         musicPopup.visibility = if (map || !musicOpen) View.GONE else View.VISIBLE
     }
 
+    private fun toggleMusic() {
+        musicOpen = !musicOpen
+        musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
+        musicFab.text = if (musicOpen) "✕" else "♪"
+    }
+
     // ---------- Navegação ----------
 
     private fun onFix(loc: Location) {
@@ -760,6 +814,7 @@ class MainActivity : Activity() {
         mapInfoView.text = sub
         navView.text = "➜ $main"
         navView.visibility = if (main.isEmpty()) View.GONE else View.VISIBLE
+        navView.isSelected = true
     }
 
     private fun go() {
@@ -1084,6 +1139,9 @@ class MainActivity : Activity() {
 
         // Lê as escolhas salvas na tela de Configurações
         accent = Prefs.accentColor(this)
+        arcColor = Prefs.colorOf(this, "arc_color", BLUE)
+        numColor = Prefs.colorOf(this, "num_color", Color.WHITE)
+        unitColor = Prefs.colorOf(this, "unit_color", GRAY)
         units = Prefs.getInt(this, "units")
         appliedVer = Prefs.version(this)
         val bgStyle = Prefs.getInt(this, "bg")
@@ -1115,7 +1173,7 @@ class MainActivity : Activity() {
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // Player: painel que abre (acima do botão) e botão flutuante no canto
+        // Player: painel que abre (acima do botão) e botão flutuante arrastável
         frame.addView(
             musicPopup,
             FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply {
@@ -1165,16 +1223,19 @@ class MainActivity : Activity() {
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap(false)
         minimap.alpha = 0.35f
-        arcView = SpeedArcView(this).apply { this.accent = this@MainActivity.accent }
+        arcView = SpeedArcView(this).apply { this.accent = this@MainActivity.arcColor }
         arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1
         speedView = label(
             if (digital) (if (landscape) 110f else 120f) else (if (landscape) 64f else 84f),
-            Color.WHITE,
+            numColor,
             bold = true,
             align = Gravity.CENTER
-        ).apply { text = "0" }
-        unitView = label(16f, GRAY, align = Gravity.CENTER).apply { text = unitSpeed() }
+        ).apply {
+            text = "0"
+            maxLines = 1
+        }
+        unitView = label(16f, unitColor, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -1187,15 +1248,28 @@ class MainActivity : Activity() {
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
         }
 
-        // Linha de navegação (aparece quando há rota)
+        // Linha de navegação: fica numa linha só e desliza se for longa
         navView = label(15f, BLUE_LIGHT, bold = true, align = Gravity.CENTER).apply {
             visibility = View.GONE
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.MARQUEE
+            isSelected = true
         }
 
-        // Cartões de estatística
-        distView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = distText(0.0) }
-        timeView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = "00:00:00" }
-        maxView = label(20f, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply { text = "0" }
+        // Cartões de estatística (valores sempre em uma linha)
+        val statSize = if (landscape) 16f else 20f
+        distView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
+            text = distText(0.0)
+            maxLines = 1
+        }
+        timeView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
+            text = "00:00:00"
+            maxLines = 1
+        }
+        maxView = label(statSize, Color.WHITE, bold = true, mono = true, align = Gravity.CENTER).apply {
+            text = "0"
+            maxLines = 1
+        }
         val statsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         statsRow.addView(statCard("VIAGEM", distView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
         statsRow.addView(statCard("TEMPO", timeView), LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) })
@@ -1268,7 +1342,7 @@ class MainActivity : Activity() {
             addView(controls, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
         }
 
-        // Botão flutuante ♪ / ✕
+        // Botão flutuante ♪ / ✕ (arrastável; a posição fica salva)
         musicFab = Button(this).apply {
             text = if (musicOpen) "✕" else "♪"
             textSize = 22f
@@ -1279,12 +1353,11 @@ class MainActivity : Activity() {
             minHeight = 0
             minimumHeight = 0
             setPadding(0, 0, 0, 0)
-            setOnClickListener {
-                musicOpen = !musicOpen
-                musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
-                text = if (musicOpen) "✕" else "♪"
-            }
+            setOnClickListener { toggleMusic() }
         }
+        musicFab.translationX = Prefs.getInt(this, "fab_x").toFloat()
+        musicFab.translationY = Prefs.getInt(this, "fab_y").toFloat()
+        musicFab.setOnTouchListener(fabTouch)
 
         // Botões pequenos: mapa, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("🗺")
@@ -1312,6 +1385,7 @@ class MainActivity : Activity() {
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
         if (landscape) {
+            // Paisagem: mapa maior à esquerda, dados à direita
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
             left.addView(vehicleView, gap(0))
@@ -1327,7 +1401,7 @@ class MainActivity : Activity() {
                 isFillViewport = true
                 addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
             }
-            root.addView(left, LinearLayout.LayoutParams(0, MATCH, 1.1f))
+            root.addView(left, LinearLayout.LayoutParams(0, MATCH, 1.8f))
             root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(12) })
         } else {
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
