@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -33,6 +34,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -113,7 +115,10 @@ class SpeedArcView(ctx: Context) : View(ctx) {
 
     override fun onDraw(canvas: Canvas) {
         val pad = context.pxF(16f)
-        rect.set(pad, pad, width - pad, height - pad)
+        val side = minOf(width, height) - pad * 2
+        val left = (width - side) / 2f
+        val top = (height - side) / 2f
+        rect.set(left, top, left + side, top + side)
         canvas.drawArc(rect, 135f, 270f, false, trackPaint)
 
         val frac = (speed / 200f).coerceIn(0f, 1f)
@@ -257,6 +262,14 @@ class MainActivity : Activity() {
         } else {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 1)
         }
+    }
+
+    // Chamado quando o celular gira. Como o manifesto declara configChanges,
+    // o app não reinicia: só refazemos o layout para a nova orientação.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        setContentView(buildUi())
+        updateMedia()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -425,6 +438,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi(): FrameLayout {
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
         val frame = FrameLayout(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
@@ -434,7 +449,7 @@ class MainActivity : Activity() {
         frame.addView(GridView(this), FrameLayout.LayoutParams(MATCH, MATCH))
 
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             setPadding(px(16), px(12), px(16), px(16))
         }
         frame.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -453,7 +468,7 @@ class MainActivity : Activity() {
 
         // Arco com a velocidade no centro
         arcView = SpeedArcView(this)
-        speedView = label(84f, Color.WHITE, bold = true, align = Gravity.CENTER).apply { text = "0" }
+        speedView = label(if (landscape) 64f else 84f, Color.WHITE, bold = true, align = Gravity.CENTER).apply { text = "0" }
         val unitView = label(16f, GRAY, align = Gravity.CENTER).apply { text = "km/h" }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -534,13 +549,35 @@ class MainActivity : Activity() {
         controls.addView(playBtn, LinearLayout.LayoutParams(0, px(64), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
         controls.addView(nextBtn, LinearLayout.LayoutParams(0, px(64), 1f).apply { setMargins(px(4), 0, px(4), 0) })
 
-        // Montagem final
-        root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-        root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
-        root.addView(statsRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
-        root.addView(tripRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
-        root.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(12) })
-        root.addView(controls, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(12) })
+        fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
+
+        if (landscape) {
+            // Paisagem: velocímetro à esquerda, informações à direita (com rolagem se faltar espaço)
+            val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+            val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            right.addView(statsRow, gap(0))
+            right.addView(tripRow, gap(8))
+            right.addView(card, gap(10))
+            right.addView(controls, gap(10))
+
+            val scroll = ScrollView(this).apply {
+                isFillViewport = true
+                addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
+            }
+            root.addView(left, LinearLayout.LayoutParams(0, MATCH, 1.1f))
+            root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(12) })
+        } else {
+            // Retrato: tudo em coluna
+            root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
+            root.addView(statsRow, gap(8))
+            root.addView(tripRow, gap(8))
+            root.addView(card, gap(12))
+            root.addView(controls, gap(12))
+        }
         return frame
     }
 }
