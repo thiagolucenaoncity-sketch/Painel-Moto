@@ -41,14 +41,33 @@ class SettingsActivity : Activity() {
 
         col.addView(section("APARÊNCIA", accent))
         col.addView(cycler("Plano de fundo", Prefs.BG_NAMES, "bg"))
-        col.addView(cycler("Cor de destaque", Prefs.ACCENT_NAMES, "accent"))
-        col.addView(cycler("Velocímetro", Prefs.GAUGE_NAMES, "gauge"))
+        col.addView(cycler("Cor de destaque", Prefs.COLOR_NAMES, "accent_c"))
+        col.addView(cycler("Cor do fundo", Prefs.COLOR_NAMES, "bg_c"))
+        col.addView(cycler("Cor da grade", Prefs.COLOR_NAMES, "grid_c"))
+        col.addView(cycler("Cor dos cartões", Prefs.COLOR_NAMES, "card_c"))
+        col.addView(cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
+        col.addView(cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
         col.addView(cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
 
-        col.addView(section("CORES DO VELOCÍMETRO", accent))
+        col.addView(section("VELOCÍMETRO", accent))
+        col.addView(cycler("Estilo", Prefs.GAUGE_NAMES, "gauge"))
         col.addView(cycler("Cor do velocímetro", Prefs.COLOR_NAMES, "arc_color"))
         col.addView(cycler("Cor dos números", Prefs.COLOR_NAMES, "num_color"))
-        col.addView(cycler("Cor do texto km/h", Prefs.COLOR_NAMES, "unit_color"))
+        col.addView(cycler("Cor do km/h", Prefs.COLOR_NAMES, "unit_color"))
+        col.addView(cycler("Cor das estatísticas", Prefs.COLOR_NAMES, "stat_c"))
+
+        val resetColors = Button(this).apply {
+            text = "Restaurar cores padrão"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF14284A.toInt())
+            setOnClickListener {
+                Prefs.resetColors(this@SettingsActivity)
+                Toast.makeText(this@SettingsActivity, "Cores restauradas", Toast.LENGTH_SHORT).show()
+                recreate()
+            }
+        }
+        col.addView(resetColors, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
 
         col.addView(section("UNIDADES", accent))
         col.addView(cycler("Medidas", Prefs.UNIT_NAMES, "units"))
