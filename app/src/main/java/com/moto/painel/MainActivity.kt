@@ -123,47 +123,6 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
 
 private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
 
-// Desenha o ícone da sua posição, de acordo com a escolha do usuário
-private fun markerBitmap(shape: Int, color: Int): Bitmap {
-    val bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
-    val c = Canvas(bmp)
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
-    val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.WHITE }
-    when (shape) {
-        0 -> {
-            val path = Path().apply {
-                moveTo(48f, 6f); lineTo(86f, 88f); lineTo(48f, 70f); lineTo(10f, 88f); close()
-            }
-            c.drawPath(path, fill)
-            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                this.color = Color.WHITE
-                style = Paint.Style.STROKE
-                strokeWidth = 4f
-            })
-        }
-        1 -> {
-            c.drawCircle(22f, 72f, 15f, white)
-            c.drawCircle(74f, 72f, 15f, white)
-            c.drawCircle(22f, 72f, 9f, fill)
-            c.drawCircle(74f, 72f, 9f, fill)
-            c.drawRoundRect(RectF(26f, 40f, 70f, 60f), 8f, 8f, fill)
-            c.drawCircle(48f, 26f, 10f, fill)
-        }
-        2 -> {
-            c.drawCircle(48f, 48f, 26f, white)
-            c.drawCircle(48f, 48f, 19f, fill)
-        }
-        else -> {
-            c.drawCircle(48f, 48f, 44f, fill)
-            val arrow = Path().apply {
-                moveTo(48f, 18f); lineTo(70f, 66f); lineTo(48f, 56f); lineTo(26f, 66f); close()
-            }
-            c.drawPath(arrow, white)
-        }
-    }
-    return bmp
-}
-
 // ---------- Fundo com grade ----------
 
 class GridView(ctx: Context, lineColor: Int) : View(ctx) {
@@ -703,7 +662,8 @@ class MainActivity : Activity() {
 
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
-        s.addImage("me-icon", markerBitmap(Prefs.getInt(this, "marker"), accent))
+        // Ícone da sua posição, escolhido nas Configurações
+        s.addImage("me-icon", styledMarker(Prefs.getInt(this, "marker"), accent))
 
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
