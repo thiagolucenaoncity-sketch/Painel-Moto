@@ -8,7 +8,7 @@ import android.graphics.Path
 import android.graphics.RectF
 
 // Ícones da sua posição no mapa, desenhados em um espaço de 100 x 100 e depois ampliados
-fun styledMarker(style: Int, color: Int): Bitmap {
+fun styledMarker(shape: Int, color: Int): Bitmap {
     val size = 120
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
@@ -27,7 +27,7 @@ fun styledMarker(style: Int, color: Int): Bitmap {
     val dark = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xFF1A1A2E.toInt() }
     val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.WHITE }
 
-    when (style) {
+    when (shape) {
         0 -> {
             // Seta Waze
             val path = Path().apply {
@@ -67,9 +67,10 @@ fun styledMarker(style: Int, color: Int): Bitmap {
         }
         3 -> {
             // Ponto GPS com halo
-            c.drawCircle(50f, 50f, 46f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = (color and 0x00FFFFFF) or 0x44000000
-            })
+            }
+            c.drawCircle(50f, 50f, 46f, halo)
             c.drawCircle(50f, 50f, 24f, white)
             c.drawCircle(50f, 50f, 17f, fill)
         }
