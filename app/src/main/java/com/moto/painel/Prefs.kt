@@ -8,7 +8,7 @@ object Prefs {
 
     val BG_NAMES = arrayOf("Grade azul", "Preto", "Azul degradê", "Roxo degradê")
     val GAUGE_NAMES = arrayOf("Arco", "Digital")
-    val MARKER_NAMES = arrayOf("Seta", "Moto", "Ponto", "Círculo")
+    val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino")
     val UNIT_NAMES = arrayOf("km/h e km", "mph e milhas")
 
     // Paleta usada por todas as opções de cor. Índice 0 = "Padrão" (cor original do tema)
@@ -62,7 +62,7 @@ object Prefs {
         e.apply()
     }
 
-    // Salva sem mexer na versão (usado para a posição do botão ♪)
+    // Salva sem mexer na versão (usado para a posição do botão ♪ e o estilo do mapa)
     fun putRaw(ctx: Context, key: String, value: Int) {
         prefs(ctx).edit().putInt(key, value).apply()
     }
