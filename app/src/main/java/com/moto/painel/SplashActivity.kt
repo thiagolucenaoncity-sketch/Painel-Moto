@@ -2,6 +2,7 @@ package com.moto.painel
 
 import android.app.Activity
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
@@ -13,7 +14,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import java.io.File
 
-// Tela de abertura: mostra o logo do Ravo ou a foto escolhida e depois abre o app
+// Tela de abertura: mostra o logo do Ravo ou a foto certa para a orientação e depois abre o app
 class SplashActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
@@ -21,19 +22,22 @@ class SplashActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val mode = Prefs.getInt(this, "splash_mode") // 0 = logo, 1 = minha foto, 2 = desligada
+        val mode = Prefs.getInt(this, "splash_mode") // 0 = logo, 1 = minhas fotos, 2 = desligada
         if (mode == 2) {
             goNext()
             return
         }
 
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val photo = if (mode == 1) loadPhoto(landscape) else null
+
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val photo = if (mode == 1) loadPhoto() else null
 
         if (photo != null) {
+            // Mostra a foto inteira, sem cortar; sobra faixa preta se a proporção não bater
             val img = ImageView(this).apply {
                 setImageBitmap(photo)
-                scaleType = ImageView.ScaleType.CENTER_CROP
+                scaleType = ImageView.ScaleType.FIT_CENTER
             }
             frame.addView(
                 img,
@@ -56,9 +60,14 @@ class SplashActivity : Activity() {
         handler.postDelayed({ goNext() }, 2500)
     }
 
-    private fun loadPhoto() = try {
-        val f = File(filesDir, "splash.jpg")
-        if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
+    // Carrega a foto da orientação atual; se não existir, usa a outra
+    private fun loadPhoto(landscape: Boolean) = try {
+        val first = if (landscape) "splash_l.jpg" else "splash_p.jpg"
+        val second = if (landscape) "splash_p.jpg" else "splash_l.jpg"
+        val f = listOf(first, second)
+            .map { File(filesDir, it) }
+            .firstOrNull { it.exists() }
+        if (f != null) BitmapFactory.decodeFile(f.absolutePath) else null
     } catch (e: Exception) {
         null
     }
