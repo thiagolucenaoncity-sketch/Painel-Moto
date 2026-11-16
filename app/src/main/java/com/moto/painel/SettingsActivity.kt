@@ -19,7 +19,8 @@ import java.io.File
 
 class SettingsActivity : Activity() {
 
-    private val reqPhoto = 42
+    private val reqPortrait = 42
+    private val reqLandscape = 43
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -80,21 +81,9 @@ class SettingsActivity : Activity() {
         col.addView(cycler("Prédios 3D", arrayOf("Desligados", "Ligados"), "buildings"))
 
         col.addView(section("ABERTURA DO APP", accent))
-        col.addView(cycler("Tela de abertura", arrayOf("Logo Ravo", "Minha foto", "Desligada"), "splash_mode"))
-        val pickPhoto = Button(this).apply {
-            text = "Escolher minha foto"
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0xFF14284A.toInt())
-            setOnClickListener {
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "image/*"
-                }
-                this@SettingsActivity.startActivityForResult(intent, reqPhoto)
-            }
-        }
-        col.addView(pickPhoto, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
+        col.addView(cycler("Tela de abertura", arrayOf("Logo Ravo", "Minhas fotos", "Desligada"), "splash_mode"))
+        col.addView(pickButton("Foto para celular em pé", reqPortrait), LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
+        col.addView(pickButton("Foto para celular deitado", reqLandscape), LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
 
         col.addView(section("UNIDADES", accent))
         col.addView(cycler("Medidas", Prefs.UNIT_NAMES, "units"))
@@ -132,15 +121,31 @@ class SettingsActivity : Activity() {
         }
     }
 
-    // Recebe a foto escolhida pelo usuário
+    // Botão que abre a galeria para escolher a foto (retrato ou paisagem)
+    private fun pickButton(label: String, requestCode: Int): Button = Button(this).apply {
+        text = label
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        setBackgroundColor(0xFF14284A.toInt())
+        setOnClickListener {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+            }
+            this@SettingsActivity.startActivityForResult(intent, requestCode)
+        }
+    }
+
+    // Recebe a foto escolhida e salva no arquivo da orientação correspondente
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == reqPhoto && resultCode == RESULT_OK) {
+        if ((requestCode == reqPortrait || requestCode == reqLandscape) && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
-            if (saveSplashPhoto(uri)) {
+            val target = if (requestCode == reqPortrait) "splash_p.jpg" else "splash_l.jpg"
+            if (saveSplashPhoto(uri, target)) {
                 Prefs.save(this, "splash_mode", 1)
-                Toast.makeText(this, "Foto salva para a abertura", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Foto salva", Toast.LENGTH_SHORT).show()
                 setContentView(buildUi())
             } else {
                 Toast.makeText(this, "Não consegui abrir essa foto", Toast.LENGTH_SHORT).show()
@@ -149,17 +154,17 @@ class SettingsActivity : Activity() {
     }
 
     // Copia a foto para dentro do app, reduzindo o tamanho para não pesar
-    private fun saveSplashPhoto(uri: Uri): Boolean {
+    private fun saveSplashPhoto(uri: Uri, fileName: String): Boolean {
         try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             var sample = 1
-            while (bounds.outWidth / sample > 1080 || bounds.outHeight / sample > 1920) sample *= 2
+            while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) sample *= 2
 
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             val bmp = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
                 ?: return false
-            File(filesDir, "splash.jpg").outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            File(filesDir, fileName).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             bmp.recycle()
             return true
         } catch (e: Exception) {
