@@ -296,7 +296,7 @@ class MainActivity : Activity() {
     private var mapMode = 0
     private val styleBtns = ArrayList<Button>()
 
-    // Mapa 3D (inclinado com prédios) ou 2D (visão de cima)
+    // Mapa 3D (inclinado) ou 2D (visão de cima)
     private var is3D = false
     private val modeBtns = ArrayList<Button>()
 
@@ -689,6 +689,10 @@ class MainActivity : Activity() {
         }
     }
 
+    // Prédios aparecem só se o 3D estiver ativo e a opção "Prédios 3D" estiver ligada nas Configurações
+    private fun buildingsOn(): Boolean =
+        is3D && Prefs.getInt(this, "buildings") == 1
+
     // ---------- Mapa: criação, estilo e camadas ----------
 
     private fun newMap(interactive: Boolean): MapView {
@@ -727,7 +731,7 @@ class MainActivity : Activity() {
                         ),
                         PropertyFactory.fillExtrusionColor(0xFF2A3F63.toInt()),
                         PropertyFactory.fillExtrusionOpacity(0.9f),
-                        PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE)
+                        PropertyFactory.visibility(if (buildingsOn()) Property.VISIBLE else Property.NONE)
                     )
                 s.addLayer(b)
                 h.buildings = b
@@ -821,11 +825,11 @@ class MainActivity : Activity() {
         }
     }
 
-    // Alterna entre visão 2D (de cima) e 3D (inclinada, com prédios)
+    // Alterna entre visão 2D (de cima) e 3D (inclinada)
     private fun toggle3D() {
         is3D = !is3D
         holders.forEach { h ->
-            h.buildings?.setProperties(PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE))
+            h.buildings?.setProperties(PropertyFactory.visibility(if (buildingsOn()) Property.VISIBLE else Property.NONE))
             val m = h.map
             if (m != null) {
                 if (followMe) {
