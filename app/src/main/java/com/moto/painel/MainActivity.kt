@@ -63,6 +63,7 @@ import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
@@ -74,12 +75,18 @@ import java.util.Date
 import java.util.Locale
 import java.util.Random
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 // ---------- Constantes ----------
 
-private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+private const val LIGHT_URL = "https://tiles.openfreemap.org/styles/liberty"
+private const val DARK_URL = "https://api.protomaps.com/styles/v4/dark/en.json"
 private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
+
+// Distância (em metros) para considerar que você saiu da rota
+private const val OFF_ROUTE_M = 60.0
 
 // ---------- Cores padrão e helpers ----------
 
@@ -285,6 +292,10 @@ class MainActivity : Activity() {
     // Orientação: 0 = automático, 1 = paisagem fixa, 2 = retrato fixo
     private var orientMode = 0
 
+    // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro
+    private var mapMode = 0
+    private val styleBtns = ArrayList<Button>()
+
     // Mapa 3D (inclinado com prédios) ou 2D (visão de cima)
     private var is3D = false
     private val modeBtns = ArrayList<Button>()
@@ -350,6 +361,11 @@ class MainActivity : Activity() {
     private var routePoints: List<LatLng> = emptyList()
     private var routeDest: LatLng? = null
     private var routeName = ""
+
+    // Recálculo de rota
+    private var offCount = 0
+    private var lastRecalcMs = 0L
+    private var recalculating = false
 
     // Viagem (valores internos sempre em km/h e metros)
     private var tripLast: Location? = null
@@ -486,7 +502,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
-                m.setStyle(Style.Builder().fromUri(STYLE_URL)) { s -> onStyleReady(this, s) }
+                m.setStyle(Style.Builder().fromUri(currentStyleUrl())) { s -> onStyleReady(this, s) }
             }
         }
     }
@@ -604,6 +620,7 @@ class MainActivity : Activity() {
         cBgCustom = Prefs.colorOf(this, "bg_c", 0)
         units = Prefs.getInt(this, "units")
         appliedVer = Prefs.version(this)
+        mapMode = Prefs.getInt(this, "map_style")
     }
 
     // Fundo: cor personalizada se o usuário escolheu, senão o plano de fundo escolhido
@@ -646,6 +663,32 @@ class MainActivity : Activity() {
         musicDock.post { applyDockPos(musicDock.translationX, musicDock.translationY) }
     }
 
+    // ---------- Estilo do mapa (claro, escuro ou automático) ----------
+
+    private fun currentStyleUrl(): String {
+        val dark = when (Prefs.getInt(this, "map_style")) {
+            1 -> false
+            2 -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        }
+        return if (dark) DARK_URL else LIGHT_URL
+    }
+
+    private fun styleLabel(): String = when (mapMode) {
+        1 -> "☀"
+        2 -> "☾"
+        else -> "A"
+    }
+
+    // Troca o estilo de todos os mapas e refaz as camadas (rota, posição, prédios)
+    private fun applyMapStyle() {
+        val url = currentStyleUrl()
+        holders.forEach { h ->
+            h.map?.setStyle(Style.Builder().fromUri(url)) { s -> onStyleReady(h, s) }
+        }
+    }
+
     // ---------- Mapa: criação, estilo e camadas ----------
 
     private fun newMap(interactive: Boolean): MapView {
@@ -668,21 +711,29 @@ class MainActivity : Activity() {
         s.addSource(ds)
         s.addSource(ms)
 
-        // Prédios em 3D (camada extra por cima do mapa)
-        try {
-            val b = FillExtrusionLayer("building-3d", "openmaptiles")
-                .withSourceLayer("building")
-                .withProperties(
-                    PropertyFactory.fillExtrusionHeight(Expression.get("render_height")),
-                    PropertyFactory.fillExtrusionBase(Expression.get("render_min_height")),
-                    PropertyFactory.fillExtrusionColor(0xFF2A3F63.toInt()),
-                    PropertyFactory.fillExtrusionOpacity(0.9f),
-                    PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE)
-                )
-            s.addLayer(b)
-            h.buildings = b
-        } catch (e: Exception) {
-            // Se o estilo não tiver a camada de prédios, o mapa continua em 2D
+        // Prédios em 3D: usa a fonte de dados vetoriais do estilo atual
+        val vec = s.sources.firstOrNull { it is VectorSource } as? VectorSource
+        if (vec != null) {
+            try {
+                val isProto = vec.id.contains("proto", ignoreCase = true)
+                val b = FillExtrusionLayer("building-3d", vec.id)
+                    .withSourceLayer(if (isProto) "buildings" else "building")
+                    .withProperties(
+                        PropertyFactory.fillExtrusionHeight(
+                            Expression.get(if (isProto) "height" else "render_height")
+                        ),
+                        PropertyFactory.fillExtrusionBase(
+                            Expression.get(if (isProto) "min_height" else "render_min_height")
+                        ),
+                        PropertyFactory.fillExtrusionColor(0xFF2A3F63.toInt()),
+                        PropertyFactory.fillExtrusionOpacity(0.9f),
+                        PropertyFactory.visibility(if (is3D) Property.VISIBLE else Property.NONE)
+                    )
+                s.addLayer(b)
+                h.buildings = b
+            } catch (e: Exception) {
+                // Se o estilo não tiver a camada de prédios, o mapa continua em 2D
+            }
         }
 
         s.addLayer(
@@ -844,6 +895,21 @@ class MainActivity : Activity() {
 
     private fun onFix(loc: Location) {
         if (steps.isEmpty() || stepIndex >= steps.size) return
+
+        // Verifica se saiu da rota; se ficou fora por alguns segundos, recalcula
+        if (routePoints.size > 1) {
+            val off = distToRouteM(loc.latitude, loc.longitude)
+            if (off > OFF_ROUTE_M) {
+                offCount++
+                if (offCount >= 3 && !recalculating && System.currentTimeMillis() - lastRecalcMs > 20000) {
+                    recalculate(loc)
+                    return
+                }
+            } else {
+                offCount = 0
+            }
+        }
+
         val s = steps[stepIndex]
         val d = distance(loc.latitude, loc.longitude, s.lat, s.lon)
 
@@ -869,7 +935,42 @@ class MainActivity : Activity() {
         showInstruction("${s.text} · em ${fmtDist(d)}", "Faltam ${fmtDist(remaining)}")
     }
 
-    // Mostra a instrução no mapa completo e na linha de navegação do painel
+    // Menor distância (em metros) entre sua posição e a linha da rota
+    private fun distToRouteM(lat: Double, lon: Double): Double {
+        val pts = routePoints
+        if (pts.size < 2) return 0.0
+        val cosLat = cos(Math.toRadians(lat))
+        var best = Double.MAX_VALUE
+        for (i in 0 until pts.size - 1) {
+            val a = pts[i]
+            val b = pts[i + 1]
+            val ax = (a.longitude - lon) * cosLat * 111320.0
+            val ay = (a.latitude - lat) * 110540.0
+            val bx = (b.longitude - lon) * cosLat * 111320.0
+            val by = (b.latitude - lat) * 110540.0
+            val dx = bx - ax
+            val dy = by - ay
+            val len2 = dx * dx + dy * dy
+            val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+            val px = ax + dx * t
+            val py = ay + dy * t
+            val d = sqrt(px * px + py * py)
+            if (d < best) best = d
+        }
+        return best
+    }
+
+    // Pede uma nova rota a partir da posição atual, avisando por voz
+    private fun recalculate(loc: Location) {
+        val dest = routeDest ?: return
+        recalculating = true
+        lastRecalcMs = System.currentTimeMillis()
+        offCount = 0
+        say("Recalculando rota")
+        fetchRoute(loc, dest.latitude, dest.longitude, routeName, true)
+    }
+
+    // Mostra a instrução no cartão do mapa e na linha de navegação do painel
     private fun showInstruction(main: String, sub: String) {
         mapInstructionView.text = main
         mapInfoView.text = sub
@@ -904,13 +1005,23 @@ class MainActivity : Activity() {
                 val destLat = hit.getDouble("lat")
                 val destLon = hit.getDouble("lon")
                 val name = hit.optString("display_name", q).take(60)
+                handler.post { fetchRoute(origin, destLat, destLon, name, false) }
+            } catch (e: Exception) {
+                handler.post { toast("Não consegui calcular a rota. Verifique a internet.") }
+            }
+        }.start()
+    }
 
+    // Busca a rota (usada na primeira vez e também no recálculo)
+    private fun fetchRoute(origin: Location, destLat: Double, destLon: Double, name: String, isRecalc: Boolean) {
+        Thread {
+            try {
                 val url = "https://router.project-osrm.org/route/v1/driving/" +
                     "${origin.longitude},${origin.latitude};$destLon,$destLat" +
                     "?overview=full&geometries=geojson&steps=true"
                 val res = JSONObject(getText(url))
                 if (res.optString("code") != "Ok") {
-                    handler.post { toast("Não achei rota até lá") }
+                    handler.post { if (!isRecalc) toast("Não achei rota até lá") }
                     return@Thread
                 }
 
@@ -944,44 +1055,51 @@ class MainActivity : Activity() {
                 val total = route.getDouble("distance")
                 val dur = route.getDouble("duration")
                 handler.post {
-                    showRoute(points, list, LatLng(destLat, destLon), name, total, dur)
+                    applyRoute(points, list, LatLng(destLat, destLon), name, total, dur, isRecalc)
                 }
             } catch (e: Exception) {
-                handler.post { toast("Não consegui calcular a rota. Verifique a internet.") }
+                handler.post { if (!isRecalc) toast("Não consegui calcular a rota. Verifique a internet.") }
+            } finally {
+                recalculating = false
             }
         }.start()
     }
 
-    private fun showRoute(
+    private fun applyRoute(
         points: List<LatLng>,
         list: List<Step>,
         dest: LatLng,
         name: String,
         totalM: Double,
-        durS: Double
+        durS: Double,
+        isRecalc: Boolean
     ) {
         routePoints = points
         routeDest = dest
         routeName = name
         steps = list
         announcedNear = false
+        offCount = 0
+        lastRecalcMs = System.currentTimeMillis()
         // O primeiro passo começa no seu ponto atual, então pulamos ele
         stepIndex = if (list.size > 1) 1 else 0
 
         holders.forEach { refreshRoute(it) }
 
-        // Mostra a rota inteira no mapa grande (para de seguir até você tocar em ◎)
-        followMe = false
-        val full = holders.firstOrNull { it.interactive }?.map
-        if (full != null && points.size > 1) {
-            val bounds = LatLngBounds.Builder().includes(points).build()
-            full.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+        // Na primeira rota, mostra o trajeto inteiro no mapa grande (para de seguir até tocar em ◎)
+        if (!isRecalc) {
+            followMe = false
+            val full = holders.firstOrNull { it.interactive }?.map
+            if (full != null && points.size > 1) {
+                val bounds = LatLngBounds.Builder().includes(points).build()
+                full.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+            }
         }
 
         if (list.isNotEmpty()) {
             val first = list[stepIndex]
             showInstruction(first.text, "Total ${fmtDist(totalM)} · cerca de ${(durS / 60).roundToInt()} min")
-            say(first.text)
+            say(if (isRecalc) "Rota recalculada. ${first.text}" else first.text)
         }
     }
 
@@ -990,6 +1108,7 @@ class MainActivity : Activity() {
         routeDest = null
         steps = emptyList()
         stepIndex = 0
+        offCount = 0
         holders.forEach { refreshRoute(it) }
         mapInstructionView.text = "Digite um destino acima"
         mapInfoView.text = ""
@@ -1203,6 +1322,7 @@ class MainActivity : Activity() {
         // Desfaz os mapas antigos antes de montar a tela de novo
         destroyHolders()
         modeBtns.clear()
+        styleBtns.clear()
 
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         loadColors()
@@ -1468,96 +1588,4 @@ class MainActivity : Activity() {
         } else {
             // Retrato: o player fica só no botão flutuante, por isso não entra aqui
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(vehicleView, gap(0))
-            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
-            root.addView(navView, gap(4))
-            root.addView(statsBox, gap(8))
-            root.addView(tripRow, gap(8))
-            root.addView(navRow, gap(10))
-        }
-        return root
-    }
-
-    private fun buildMapScreen(): LinearLayout {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF06142B.toInt())
-        }
-
-        // Barra de busca, 2D/3D, centralizar (◎) e voltar ao painel
-        val topRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(8), px(8), px(8), px(8))
-        }
-        searchInput = EditText(this).apply {
-            hint = "Para onde? ex: Av. Paulista, 1000"
-            setHintTextColor(GRAY)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(BTN_BG)
-            setPadding(px(12), px(10), px(12), px(10))
-            setSingleLine(true)
-            imeOptions = EditorInfo.IME_ACTION_SEARCH
-            setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                    go()
-                    true
-                } else false
-            }
-        }
-        val goBtn = Button(this).apply {
-            text = "Ir"
-            setOnClickListener { go() }
-        }
-        val mode3dBtn = miniBtn(modeLabel())
-        modeBtns.add(mode3dBtn)
-        mode3dBtn.setOnClickListener { toggle3D() }
-        val centerBtn = miniBtn("◎")
-        centerBtn.setOnClickListener { recenter() }
-        val backBtn = Button(this).apply {
-            text = "Painel"
-            setOnClickListener { setScreen(false) }
-        }
-        topRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
-        topRow.addView(goBtn, LinearLayout.LayoutParams(WRAP, WRAP))
-        topRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        topRow.addView(centerBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        topRow.addView(backBtn, LinearLayout.LayoutParams(WRAP, WRAP))
-
-        // Mapa completo
-        fullMap = newMap(true)
-
-        // Cartão de instruções
-        mapInstructionView = label(22f, Color.WHITE, bold = true).apply { text = "Digite um destino acima" }
-        mapInfoView = label(15f, cClock)
-        voiceBtn = Button(this).apply { text = if (voiceOn) "Voz: ligada" else "Voz: desligada" }
-        voiceBtn.setOnClickListener {
-            voiceOn = !voiceOn
-            voiceBtn.text = if (voiceOn) "Voz: ligada" else "Voz: desligada"
-            if (!voiceOn) tts?.stop()
-        }
-        val clearBtn = Button(this).apply {
-            text = "Cancelar rota"
-            setOnClickListener { clearRoute() }
-        }
-        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnRow.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        btnRow.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val attrib = label(10f, cLabel).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
-
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cCard)
-            setPadding(px(16), px(12), px(16), px(12))
-            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(btnRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
-            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
-        }
-
-        root.addView(topRow, LinearLayout.LayoutParams(MATCH, WRAP))
-        root.addView(fullMap, LinearLayout.LayoutParams(MATCH, 0, 1f))
-        root.addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
-        return root
-    }
-}
+            root.addView(vehicleView,
