@@ -82,7 +82,7 @@ import kotlin.math.sqrt
 // ---------- Constantes ----------
 
 private const val LIGHT_URL = "https://tiles.openfreemap.org/styles/liberty"
-private const val DARK_URL = "https://api.protomaps.com/styles/v4/dark/en.json"
+private const val DARK_URL = "https://tiles.openfreemap.org/styles/dark"
 private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 
 // Distância (em metros) para considerar que você saiu da rota
