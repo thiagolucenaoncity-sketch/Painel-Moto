@@ -1588,4 +1588,116 @@ class MainActivity : Activity() {
         } else {
             // Retrato: o player fica só no botão flutuante, por isso não entra aqui
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(vehicleView,
+            root.addView(vehicleView, gap(0))
+            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
+            root.addView(navView, gap(4))
+            root.addView(statsBox, gap(8))
+            root.addView(tripRow, gap(8))
+            root.addView(navRow, gap(10))
+        }
+        return root
+    }
+
+    private fun buildMapScreen(): LinearLayout {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF06142B.toInt())
+        }
+
+        // Barra de busca, 2D/3D, centralizar (◎) e voltar ao painel
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(8), px(8), px(8), px(8))
+        }
+        searchInput = EditText(this).apply {
+            hint = "Para onde? ex: Av. Paulista, 1000"
+            setHintTextColor(GRAY)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(BTN_BG)
+            setPadding(px(12), px(10), px(12), px(10))
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                    go()
+                    true
+                } else false
+            }
+        }
+        val goBtn = Button(this).apply {
+            text = "Ir"
+            setOnClickListener { go() }
+        }
+        val mode3dBtn = miniBtn(modeLabel())
+        modeBtns.add(mode3dBtn)
+        mode3dBtn.setOnClickListener { toggle3D() }
+        val centerBtn = miniBtn("◎")
+        centerBtn.setOnClickListener { recenter() }
+        val backBtn = Button(this).apply {
+            text = "Painel"
+            setOnClickListener { setScreen(false) }
+        }
+        topRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
+        topRow.addView(goBtn, LinearLayout.LayoutParams(WRAP, WRAP))
+        topRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        topRow.addView(centerBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        topRow.addView(backBtn, LinearLayout.LayoutParams(WRAP, WRAP))
+
+        // Cartão de manobra no topo do mapa (instrução grande e distância restante)
+        mapInstructionView = label(20f, Color.WHITE, bold = true).apply {
+            text = "Digite um destino acima"
+            maxLines = 2
+        }
+        mapInfoView = label(14f, cClock)
+        val navCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(cCard)
+            setPadding(px(16), px(10), px(16), px(10))
+            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+
+        // Mapa completo
+        fullMap = newMap(true)
+
+        // Botões embaixo do mapa: voz, cancelar rota e estilo (A / ☀ / ☾)
+        voiceBtn = Button(this).apply { text = if (voiceOn) "Voz: ligada" else "Voz: desligada" }
+        voiceBtn.setOnClickListener {
+            voiceOn = !voiceOn
+            voiceBtn.text = if (voiceOn) "Voz: ligada" else "Voz: desligada"
+            if (!voiceOn) tts?.stop()
+        }
+        val clearBtn = Button(this).apply {
+            text = "Cancelar rota"
+            setOnClickListener { clearRoute() }
+        }
+        val styleBtn = miniBtn(styleLabel())
+        styleBtns.add(styleBtn)
+        styleBtn.setOnClickListener {
+            mapMode = (mapMode + 1) % 3
+            Prefs.putRaw(this, "map_style", mapMode)
+            styleBtns.forEach { it.text = styleLabel() }
+            applyMapStyle()
+        }
+        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        btnRow.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        btnRow.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        btnRow.addView(styleBtn, LinearLayout.LayoutParams(px(48), px(44)))
+        val attrib = label(10f, cLabel).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
+
+        val bottomCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(cCard)
+            setPadding(px(12), px(8), px(12), px(8))
+            addView(btnRow, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
+        }
+
+        root.addView(topRow, LinearLayout.LayoutParams(MATCH, WRAP))
+        root.addView(navCard, LinearLayout.LayoutParams(MATCH, WRAP))
+        root.addView(fullMap, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        root.addView(bottomCard, LinearLayout.LayoutParams(MATCH, WRAP))
+        return root
+    }
+}
