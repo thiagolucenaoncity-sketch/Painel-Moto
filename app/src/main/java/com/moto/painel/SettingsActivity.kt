@@ -242,6 +242,20 @@ class SettingsActivity : Activity() {
         setTextColor(0xFF7F93B5.toInt())
     }
 
+    // Mesmo acabamento arredondado em todas as páginas de configurações.
+    private fun styleOptionButton(button: Button) {
+        button.isAllCaps = false
+        button.setTextColor(Color.WHITE)
+        button.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+        button.setPadding(dp(18), dp(12), dp(18), dp(12))
+        button.minHeight = dp(56)
+        button.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF14284A.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x55000000)
+        }
+    }
+
     // Botão que abre uma página de configurações
     private fun menuBtn(label: String, iconRes: Int, onClick: () -> Unit) = Button(this).apply {
         val icon = getDrawable(iconRes)?.mutate()
@@ -266,9 +280,7 @@ class SettingsActivity : Activity() {
 
     private fun plainBtn(label: String, onClick: () -> Unit) = Button(this).apply {
         text = label
-        isAllCaps = false
-        setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(this)
         setOnClickListener { onClick() }
     }
 
@@ -279,9 +291,7 @@ class SettingsActivity : Activity() {
             b.text = "$label: ${names[i]}"
         }
         show(Prefs.getInt(this, key).coerceIn(0, names.size - 1))
-        b.isAllCaps = false
-        b.setTextColor(Color.WHITE)
-        b.setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(b)
         b.setOnClickListener {
             val next = (Prefs.getInt(this, key) + 1) % names.size
             Prefs.save(this, key, next)
