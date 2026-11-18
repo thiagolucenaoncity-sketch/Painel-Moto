@@ -23,6 +23,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -91,6 +92,10 @@ private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 // Distância (em metros) para considerar que você saiu da rota
 private const val OFF_ROUTE_M = 60.0
 
+// Velocidade abaixo da qual o veículo é considerado parado (km/h) e tempo parado para pausar a trip (ms)
+private const val STOP_KMH = 3f
+private const val STOP_MS = 4000L
+
 // ---------- Cores padrão e helpers ----------
 
 private val BLUE = 0xFF2EA8FF.toInt()
@@ -134,6 +139,9 @@ private class Suggest(val name: String, val lat: Double, val lon: Double)
 
 // Endereço favorito, com apelido
 private class Fav(val nick: String, val addr: String, val lat: Double, val lon: Double)
+
+// Trip salva pelo usuário
+private class SavedTrip(val date: String, val meters: Double, val ms: Long, val maxKmh: Int)
 
 // ---------- Fundo com grade ----------
 
@@ -252,7 +260,7 @@ class EqualizerView(ctx: Context) : View(ctx) {
     }
 }
 
-// ---------- Tela principal: painel + mapa ----------
+// ---------- Tela principal: painel + mapa + trips ----------
 
 class MainActivity : Activity() {
 
@@ -282,6 +290,9 @@ class MainActivity : Activity() {
     // Orientação: 0 = automático, 1 = paisagem fixa, 2 = retrato fixo
     private var orientMode = 0
 
+    // Tela atual: 0 = painel, 1 = mapa, 2 = trips salvas
+    private var screenMode = 0
+
     // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro (azul noite)
     private var mapMode = 0
     private val styleBtns = ArrayList<Button>()
@@ -296,7 +307,6 @@ class MainActivity : Activity() {
     // Todos os mapas (miniatura e mapa completo)
     private val holders = ArrayList<MapHolder>()
 
-    private var showMap = false
     private var locationStarted = false
     private var firstFixDone = false
 
@@ -318,16 +328,22 @@ class MainActivity : Activity() {
     private lateinit var minimap: MapView
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
+    private lateinit var batteryView: TextView
     private lateinit var gpsView: TextView
-    private lateinit var vehicleView: TextView
+    private lateinit var vehicleView: LinearLayout
+    private lateinit var nickView: TextView
+    private lateinit var modelView: TextView
     private lateinit var speedView: TextView
     private lateinit var unitView: TextView
     private lateinit var arcView: SpeedArcView
     private lateinit var navView: TextView
+    private lateinit var tripHeader: TextView
     private lateinit var distView: TextView
     private lateinit var timeView: TextView
     private lateinit var maxView: TextView
     private lateinit var tripBtn: Button
+    private lateinit var pauseBtn: Button
+    private lateinit var saveBtn: Button
     private lateinit var artView: ImageView
     private lateinit var titleView: TextView
     private lateinit var artistView: TextView
@@ -344,6 +360,10 @@ class MainActivity : Activity() {
     private lateinit var mapInstructionView: TextView
     private lateinit var mapInfoView: TextView
     private lateinit var voiceBtn: Button
+
+    // Trips salvas
+    private lateinit var tripsScreen: LinearLayout
+    private lateinit var tripsList: LinearLayout
 
     // Busca: controle das sugestões
     private var skipSuggest = false
@@ -368,23 +388,29 @@ class MainActivity : Activity() {
     private var lastRecalcMs = 0L
     private var recalculating = false
 
-    // Viagem (valores internos sempre em km/h e metros)
+    // Trip (distância em metros, tempo em ms, máxima em km/h)
+    private var tripStarted = false
+    private var manualPaused = false
+    private var autoPaused = false
+    private var segStart = 0L
+    private var tripElapsed = 0L
+    private var stoppedSince = 0L
     private var tripLast: Location? = null
     private var totalM = 0.0
     private var maxSpeed = 0
-    private var tripRunning = false
-    private var tripStart = 0L
-    private var tripElapsed = 0L
 
     private val clockFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val dateFmt = SimpleDateFormat("EEE, dd MMM", Locale("pt", "BR"))
+    private val saveFmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
 
     private val tick = object : Runnable {
         override fun run() {
             val now = Date()
             clockView.text = clockFmt.format(now)
             dateView.text = dateFmt.format(now)
+            updateBattery()
             updateTime()
+            updateTripButtons()
             handler.postDelayed(this, 1000)
         }
     }
@@ -417,17 +443,38 @@ class MainActivity : Activity() {
 
             speedView.text = speedText(shown)
             arcView.speed = shown.toFloat()
-            if (shown > maxSpeed) maxSpeed = shown
-            maxView.text = speedText(maxSpeed)
             setGps("● GPS ok (±${loc.accuracy.roundToInt()} m)", GREEN)
 
-            if (tripRunning) {
-                tripLast?.let { prev ->
+            // Pausa automática: parado por um tempo pausa a trip; voltando a andar, retoma
+            if (tripStarted && !manualPaused) {
+                val now = System.currentTimeMillis()
+                if (kmh < STOP_KMH) {
+                    if (stoppedSince == 0L) stoppedSince = now
+                    if (!autoPaused && now - stoppedSince > STOP_MS) {
+                        autoPaused = true
+                        syncRunning()
+                    }
+                } else {
+                    stoppedSince = 0L
+                    if (autoPaused) {
+                        autoPaused = false
+                        syncRunning()
+                    }
+                }
+            }
+
+            // Máxima só conta enquanto a trip está correndo
+            if (isRunning() && shown > maxSpeed) maxSpeed = shown
+            maxView.text = speedText(maxSpeed)
+
+            // Distância só soma enquanto a trip está correndo
+            tripLast?.let { prev ->
+                if (isRunning()) {
                     val d = prev.distanceTo(loc)
                     if (d in 3f..500f) totalM += d
                 }
-                distView.text = distText(totalM)
             }
+            distView.text = distText(totalM)
             tripLast = loc
             lastFix = loc
 
@@ -614,6 +661,193 @@ class MainActivity : Activity() {
     private fun setGps(text: String, color: Int) {
         gpsView.text = text
         gpsView.setTextColor(color)
+    }
+
+    // ---------- Bateria ----------
+
+    private fun updateBattery() {
+        if (!::batteryView.isInitialized) return
+        val bm = getSystemService(BATTERY_SERVICE) as BatteryManager
+        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val icon = if (bm.isCharging) "⚡" else "🔋"
+        batteryView.text = "$icon $pct%"
+    }
+
+    // ---------- Trip (início, pausa, finalização e salvamento) ----------
+
+    private fun isRunning(): Boolean = tripStarted && !manualPaused && !autoPaused
+
+    // Liga ou desliga o cronômetro conforme o estado da trip
+    private fun syncRunning() {
+        val now = System.currentTimeMillis()
+        val r = isRunning()
+        if (r && segStart == 0L) segStart = now
+        if (!r && segStart != 0L) {
+            tripElapsed += now - segStart
+            segStart = 0L
+        }
+    }
+
+    private fun elapsedMs(): Long {
+        val now = System.currentTimeMillis()
+        return tripElapsed + (if (segStart != 0L) now - segStart else 0L)
+    }
+
+    private fun startTrip() {
+        tripStarted = true
+        manualPaused = false
+        autoPaused = false
+        stoppedSince = 0L
+        syncRunning()
+        updateTripButtons()
+    }
+
+    private fun finishTrip() {
+        tripStarted = false
+        manualPaused = false
+        autoPaused = false
+        syncRunning()
+        updateTripButtons()
+    }
+
+    // Pausa ou retoma manualmente (o botão pequeno)
+    private fun toggleManualPause() {
+        if (!tripStarted) return
+        manualPaused = !manualPaused
+        autoPaused = false
+        syncRunning()
+        updateTripButtons()
+    }
+
+    private fun resetTrip() {
+        tripStarted = false
+        manualPaused = false
+        autoPaused = false
+        stoppedSince = 0L
+        tripElapsed = 0L
+        segStart = 0L
+        totalM = 0.0
+        maxSpeed = 0
+        tripLast = null
+        distView.text = distText(0.0)
+        maxView.text = speedText(0)
+        timeView.text = "00:00:00"
+        updateTripButtons()
+    }
+
+    // Atualiza os textos dos botões e o status da trip
+    private fun updateTripButtons() {
+        if (!::tripBtn.isInitialized) return
+        tripBtn.text = if (tripStarted) "■ Finalizar" else "▶ Iniciar"
+        pauseBtn.visibility = if (tripStarted) View.VISIBLE else View.GONE
+        pauseBtn.text = if (isRunning()) "⏸" else "▶"
+        tripHeader.text = when {
+            !tripStarted -> "TRIP · PARADA"
+            manualPaused -> "TRIP · ⏸ PAUSADA"
+            autoPaused -> "TRIP · ⏸ PAUSA AUTOMÁTICA"
+            else -> "TRIP · ● EM ANDAMENTO"
+        }
+    }
+
+    private fun updateTime() {
+        if (!::timeView.isInitialized) return
+        timeView.text = fmtHMS(elapsedMs())
+    }
+
+    private fun fmtHMS(ms: Long): String {
+        val s = ms / 1000
+        return String.format(Locale.US, "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+    }
+
+    // Salva a trip atual. Guarda no máximo 3: a mais antiga sai quando a quarta é salva.
+    private fun saveTrip() {
+        val ms = elapsedMs()
+        if (totalM < 1.0 && ms < 1000L) {
+            toast("Nada para salvar ainda")
+            return
+        }
+        val list = loadTrips()
+        var removed = false
+        while (list.size >= 3) {
+            list.removeAt(0)
+            removed = true
+        }
+        list.add(SavedTrip(saveFmt.format(Date()), totalM, ms, maxSpeed))
+        saveTrips(list)
+        toast(if (removed) "Trip salva. A mais antiga foi removida (máximo de 3)" else "Trip salva")
+    }
+
+    private fun tripPrefs() = getSharedPreferences("trips", MODE_PRIVATE)
+
+    private fun loadTrips(): MutableList<SavedTrip> {
+        val out = ArrayList<SavedTrip>()
+        try {
+            val arr = JSONArray(tripPrefs().getString("list", "[]") ?: "[]")
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                out.add(SavedTrip(o.getString("date"), o.getDouble("m"), o.getLong("ms"), o.getInt("max")))
+            }
+        } catch (e: Exception) {
+            // Se os dados estiverem corrompidos, começa a lista vazia
+        }
+        return out
+    }
+
+    private fun saveTrips(list: List<SavedTrip>) {
+        val arr = JSONArray()
+        list.forEach {
+            arr.put(
+                JSONObject()
+                    .put("date", it.date)
+                    .put("m", it.meters)
+                    .put("ms", it.ms)
+                    .put("max", it.maxKmh)
+            )
+        }
+        tripPrefs().edit().putString("list", arr.toString()).apply()
+    }
+
+    // Redesenha a lista de trips salvas (mais recente primeiro)
+    private fun refreshTripsList() {
+        if (!::tripsList.isInitialized) return
+        tripsList.removeAllViews()
+        val list = loadTrips()
+        if (list.isEmpty()) {
+            tripsList.addView(
+                label(15f, cLabel, align = Gravity.CENTER).apply { text = "Nenhuma trip salva ainda." },
+                LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(16) }
+            )
+            return
+        }
+        for (i in list.indices.reversed()) {
+            val t = list[i]
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = box(context, cCard, 14, cBorder)
+                setPadding(px(14), px(12), px(14), px(12))
+            }
+            card.addView(label(16f, Color.WHITE, bold = true).apply { text = t.date })
+            card.addView(
+                label(14f, cLabel).apply {
+                    text = "Distância: ${distText(t.meters)}\n" +
+                        "Tempo: ${fmtHMS(t.ms)}\n" +
+                        "Máxima: ${speedText(t.maxKmh)} ${unitSpeed()}"
+                },
+                LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) }
+            )
+            val idx = i
+            val delBtn = pill("Excluir", 0xFF8B1E2D.toInt(), Color.WHITE, 14f).apply {
+                setOnClickListener {
+                    val current = loadTrips()
+                    if (idx < current.size) current.removeAt(idx)
+                    saveTrips(current)
+                    refreshTripsList()
+                    toast("Trip excluída")
+                }
+            }
+            card.addView(delBtn, LinearLayout.LayoutParams(MATCH, px(40)).apply { topMargin = px(8) })
+            tripsList.addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(10) })
+        }
     }
 
     // ---------- Cores ----------
@@ -1204,13 +1438,15 @@ class MainActivity : Activity() {
         if (units == 1) String.format(Locale.US, "%.2f mi", m / 1609.344)
         else String.format(Locale.US, "%.2f km", m / 1000.0)
 
-    // ---------- Telas ----------
+    // ---------- Telas (0 = painel, 1 = mapa, 2 = trips salvas) ----------
 
-    private fun setScreen(map: Boolean) {
-        showMap = map
-        panelScreen.visibility = if (map) View.GONE else View.VISIBLE
-        mapScreen.visibility = if (map) View.VISIBLE else View.GONE
-        musicDock.visibility = if (map) View.GONE else View.VISIBLE
+    private fun setScreen(mode: Int) {
+        screenMode = mode
+        panelScreen.visibility = if (mode == 0) View.VISIBLE else View.GONE
+        mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
+        tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
+        musicDock.visibility = if (mode == 0) View.VISIBLE else View.GONE
+        if (mode == 2) refreshTripsList()
     }
 
     // ---------- Navegação ----------
@@ -1459,40 +1695,6 @@ class MainActivity : Activity() {
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
-    // ---------- Viagem ----------
-
-    private fun elapsedMs(): Long =
-        if (tripRunning) tripElapsed + (System.currentTimeMillis() - tripStart) else tripElapsed
-
-    private fun updateTime() {
-        val s = elapsedMs() / 1000
-        timeView.text = String.format(Locale.US, "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
-    }
-
-    private fun toggleTrip() {
-        if (tripRunning) {
-            tripElapsed = elapsedMs()
-            tripRunning = false
-            tripBtn.text = "▶ Retomar"
-        } else {
-            tripStart = System.currentTimeMillis()
-            tripRunning = true
-            tripBtn.text = "❚❚ Pausar"
-        }
-    }
-
-    private fun resetTrip() {
-        tripRunning = false
-        tripElapsed = 0L
-        totalM = 0.0
-        maxSpeed = 0
-        tripLast = null
-        tripBtn.text = "▶ Iniciar"
-        distView.text = distText(0.0)
-        maxView.text = "0"
-        timeView.text = "00:00:00"
-    }
-
     // ---------- Música ----------
 
     private fun notificationAccessGranted(): Boolean {
@@ -1622,20 +1824,24 @@ class MainActivity : Activity() {
 
         panelScreen = buildPanel(landscape)
         mapScreen = buildMapScreen()
+        tripsScreen = buildTripsScreen()
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
+        frame.addView(tripsScreen, FrameLayout.LayoutParams(MATCH, MATCH))
 
         // Player: bloco que fica no lugar do botão ♪ (ele mesmo calcula a posição)
         frame.addView(musicDock, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START))
         musicDock.post { applyFabLayout() }
 
-        setScreen(showMap)
+        setScreen(screenMode)
+        updateTripButtons()
         return frame
     }
 
     private fun buildPanel(landscape: Boolean): LinearLayout {
         val gaugeStyle = Prefs.getInt(this, "gauge")
-        val vehicleName = listOf(Prefs.getStr(this, "brand"), Prefs.getStr(this, "model"))
+        val nick = Prefs.getStr(this, "nick")
+        val brandModel = listOf(Prefs.getStr(this, "brand"), Prefs.getStr(this, "model"))
             .filter { it.isNotBlank() }
             .joinToString(" ")
 
@@ -1644,7 +1850,7 @@ class MainActivity : Activity() {
             setPadding(px(16), px(12), px(16), px(16))
         }
 
-        // Barra superior: relógio, GPS e data
+        // Barra superior: relógio, GPS e, à direita, data e bateria
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1652,14 +1858,32 @@ class MainActivity : Activity() {
         clockView = label(20f, cClock, bold = true, mono = true)
         gpsView = label(12f, cLabel, align = Gravity.CENTER)
         dateView = label(12f, cLabel, align = Gravity.END)
+        batteryView = label(12f, cLabel, align = Gravity.END)
+        val rightCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(dateView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(batteryView, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
         topBar.addView(clockView, LinearLayout.LayoutParams(0, WRAP, 1f))
         topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
-        topBar.addView(dateView, LinearLayout.LayoutParams(0, WRAP, 1f))
+        topBar.addView(rightCol, LinearLayout.LayoutParams(0, WRAP, 1f))
 
-        // Veículo escolhido nas Configurações (some se estiver vazio)
-        vehicleView = label(15f, accent, bold = true, align = Gravity.CENTER).apply {
-            text = vehicleName
-            visibility = if (vehicleName.isEmpty()) View.GONE else View.VISIBLE
+        // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
+        nickView = label(24f, accent, bold = true, align = Gravity.CENTER).apply {
+            text = nick
+            visibility = if (nick.isEmpty()) View.GONE else View.VISIBLE
+        }
+        modelView = label(14f, cLabel, align = Gravity.CENTER).apply {
+            text = brandModel
+            visibility = if (brandModel.isEmpty()) View.GONE else View.VISIBLE
+        }
+        vehicleView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            visibility = if (nick.isEmpty() && brandModel.isEmpty()) View.GONE else View.VISIBLE
+            addView(nickView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(modelView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
@@ -1698,15 +1922,18 @@ class MainActivity : Activity() {
             isSelected = true
         }
 
-        // Estatísticas: na paisagem ficam empilhadas ao lado do mapa; na vertical, lado a lado
-        distView = statValue(distText(0.0))
-        timeView = statValue("00:00:00")
-        maxView = statValue("0")
+        // Cabeçalho da trip: mostra o status (em andamento, pausada, parada)
+        tripHeader = label(12f, cClock, bold = true, align = Gravity.CENTER)
+
+        // Estatísticas da trip: na paisagem ficam empilhadas ao lado do mapa; na vertical, lado a lado
+        distView = statValue(distText(totalM))
+        timeView = statValue(fmtHMS(elapsedMs()))
+        maxView = statValue(speedText(maxSpeed))
         val statsBox = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         }
         listOf(
-            Pair("VIAGEM", distView),
+            Pair("DISTÂNCIA", distView),
             Pair("TEMPO", timeView),
             Pair("MÁX.", maxView)
         ).forEach { (title, value) ->
@@ -1719,14 +1946,23 @@ class MainActivity : Activity() {
             statsBox.addView(card, lp)
         }
 
-        // Botões da viagem
+        // Botões da trip: Iniciar/Finalizar, pausa manual (pequeno), Salvar e Zerar
         tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f)
-        tripBtn.setOnClickListener { toggleTrip() }
-        val resetBtn = pill("Zerar", BTN_BG, cLabel, 15f)
+        tripBtn.setOnClickListener {
+            if (tripStarted) finishTrip() else startTrip()
+        }
+        pauseBtn = miniBtn("⏸")
+        pauseBtn.textSize = 14f
+        pauseBtn.setOnClickListener { toggleManualPause() }
+        saveBtn = pill("Salvar", BTN_BG, Color.WHITE, 14f)
+        saveBtn.setOnClickListener { saveTrip() }
+        val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f)
         resetBtn.setOnClickListener { resetTrip() }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
-        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 2f).apply { setMargins(px(4), 0, px(4), 0) })
+        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(0, 0, px(4), 0) })
+        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
+        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
 
         // Player: capa, título e artista (fica dentro do painel flutuante)
         val card = LinearLayout(this).apply {
@@ -1813,9 +2049,11 @@ class MainActivity : Activity() {
         musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP))
         musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
 
-        // Botões pequenos: mapa, configurações, 2D/3D e rotação
+        // Botões pequenos: mapa, trips salvas, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("🗺")
-        mapBtn.setOnClickListener { setScreen(true) }
+        mapBtn.setOnClickListener { setScreen(1) }
+        val tripsBtn = miniBtn("📋")
+        tripsBtn.setOnClickListener { setScreen(2) }
         val settingsBtn = miniBtn("⚙")
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         val mode3dBtn = miniBtn(modeLabel())
@@ -1831,10 +2069,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        navRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
+        navRow.addView(tripsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
+        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
+        navRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
+        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
@@ -1847,6 +2086,7 @@ class MainActivity : Activity() {
 
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             right.addView(navView, gap(0))
+            right.addView(tripHeader, gap(4))
             right.addView(statsBox, gap(4))
             right.addView(tripRow, gap(8))
             right.addView(navRow, gap(10))
@@ -1863,10 +2103,39 @@ class MainActivity : Activity() {
             root.addView(vehicleView, gap(0))
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
             root.addView(navView, gap(4))
-            root.addView(statsBox, gap(8))
+            root.addView(tripHeader, gap(8))
+            root.addView(statsBox, gap(4))
             root.addView(tripRow, gap(8))
             root.addView(navRow, gap(10))
         }
+        return root
+    }
+
+    // Página de trips salvas (máximo de 3)
+    private fun buildTripsScreen(): LinearLayout {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF06142B.toInt())
+            setPadding(px(16), px(16), px(16), px(16))
+        }
+        root.addView(label(22f, Color.WHITE, bold = true).apply { text = "Trips salvas" })
+        root.addView(
+            label(13f, cLabel).apply {
+                text = "Você pode guardar até 3 trips. Ao salvar uma quarta, a mais antiga é removida."
+            },
+            LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) }
+        )
+
+        tripsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(tripsList, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f).apply { topMargin = px(8) })
+
+        val backBtn = pill("Voltar ao painel", BTN_BG, Color.WHITE, 15f)
+        backBtn.setOnClickListener { setScreen(0) }
+        root.addView(backBtn, LinearLayout.LayoutParams(MATCH, px(48)).apply { topMargin = px(8) })
         return root
     }
 
@@ -1987,7 +2256,7 @@ class MainActivity : Activity() {
         val centerBtn = miniBtn("◎")
         centerBtn.setOnClickListener { recenter() }
         val backBtn = pill("Painel", BTN_BG, Color.WHITE, 14f)
-        backBtn.setOnClickListener { setScreen(false) }
+        backBtn.setOnClickListener { setScreen(0) }
         val rowB = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
