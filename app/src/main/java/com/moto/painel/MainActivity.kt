@@ -1909,7 +1909,7 @@ class MainActivity : Activity() {
 
     // Ícones vetoriais nítidos com a cor de destaque personalizada.
     private fun Button.panelIcon(res: Int, color: Int = accent, size: Int = 21) {
-        val d = getDrawable(res)?.mutate() ?: return
+        val d = this@MainActivity.getDrawable(res)?.mutate() ?: return
         d.setTint(color)
         d.setBounds(0, 0, px(size), px(size))
         setCompoundDrawables(d, null, null, null)
