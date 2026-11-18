@@ -115,6 +115,7 @@ class SettingsActivity : Activity() {
         add(col, cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
         add(col, cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
         add(col, cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
+        add(col, cycler("Cor do ícone no mapa", Prefs.COLOR_NAMES, "marker_c"))
 
         add(col, plainBtn("Restaurar cores padrão") {
             Prefs.resetColors(this)
