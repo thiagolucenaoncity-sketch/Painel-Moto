@@ -22,18 +22,36 @@ class SettingsActivity : Activity() {
     private val reqPortrait = 42
     private val reqLandscape = 43
 
+    // Página aberta: null = menu principal
+    private var section: String? = null
+
+    private val match = ViewGroup.LayoutParams.MATCH_PARENT
+    private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private val accent: Int get() = Prefs.accentColor(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
     }
 
-    private fun buildUi(): ScrollView {
-        val accent = Prefs.accentColor(this)
-        val match = ViewGroup.LayoutParams.MATCH_PARENT
-        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+    // Botão voltar do celular: volta ao menu antes de sair
+    override fun onBackPressed() {
+        if (section != null) {
+            go(null)
+        } else {
+            super.onBackPressed()
+        }
+    }
 
+    private fun go(s: String?) {
+        section = s
+        setContentView(buildUi())
+    }
+
+    private fun buildUi(): ScrollView {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF06142B.toInt())
@@ -41,102 +59,129 @@ class SettingsActivity : Activity() {
         }
 
         col.addView(TextView(this).apply {
-            text = "Configurações"
+            text = titleOf(section)
             textSize = 26f
             setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
         })
 
-        col.addView(section("APARÊNCIA", accent))
-        col.addView(cycler("Plano de fundo", Prefs.BG_NAMES, "bg"))
-        col.addView(cycler("Cor de destaque", Prefs.COLOR_NAMES, "accent_c"))
-        col.addView(cycler("Cor do fundo", Prefs.COLOR_NAMES, "bg_c"))
-        col.addView(cycler("Cor da grade", Prefs.COLOR_NAMES, "grid_c"))
-        col.addView(cycler("Cor dos cartões", Prefs.COLOR_NAMES, "card_c"))
-        col.addView(cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
-        col.addView(cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
-        col.addView(cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
-
-        col.addView(section("VELOCÍMETRO", accent))
-        col.addView(cycler("Estilo", Prefs.GAUGE_NAMES, "gauge"))
-        col.addView(cycler("Cor do velocímetro", Prefs.COLOR_NAMES, "arc_color"))
-        col.addView(cycler("Cor dos números", Prefs.COLOR_NAMES, "num_color"))
-        col.addView(cycler("Cor do km/h", Prefs.COLOR_NAMES, "unit_color"))
-        col.addView(cycler("Cor das estatísticas", Prefs.COLOR_NAMES, "stat_c"))
-
-        val resetColors = Button(this).apply {
-            text = "Restaurar cores padrão"
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0xFF14284A.toInt())
-            setOnClickListener {
-                Prefs.resetColors(this@SettingsActivity)
-                Toast.makeText(this@SettingsActivity, "Cores restauradas", Toast.LENGTH_SHORT).show()
-                setContentView(buildUi())
+        if (section == null) {
+            add(col, menuBtn("🎨  Aparência") { go("aparencia") }, 20)
+            add(col, menuBtn("🏎  Velocímetro") { go("velocimetro") }, 10)
+            add(col, menuBtn("🗺  Mapa") { go("mapa") }, 10)
+            add(col, menuBtn("🎬  Abertura do app") { go("abertura") }, 10)
+            add(col, menuBtn("📏  Unidades") { go("unidades") }, 10)
+            add(col, menuBtn("🏍  Veículo") { go("veiculo") }, 10)
+            add(col, plainBtn("Voltar ao painel") { finish() }, 24)
+        } else {
+            when (section) {
+                "aparencia" -> addAppearance(col)
+                "velocimetro" -> addVelocimetro(col)
+                "mapa" -> addMapa(col)
+                "abertura" -> addAbertura(col)
+                "unidades" -> addUnidades(col)
+                "veiculo" -> addVeiculo(col)
             }
+            add(col, plainBtn("← Voltar às configurações") { go(null) }, 24)
         }
-        col.addView(resetColors, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
-
-        col.addView(section("MAPA", accent))
-        col.addView(cycler("Prédios 3D", arrayOf("Desligados", "Ligados"), "buildings"))
-
-        col.addView(section("ABERTURA DO APP", accent))
-        col.addView(cycler("Tela de abertura", arrayOf("Logo Ravo", "Minhas fotos", "Desligada"), "splash_mode"))
-        col.addView(pickButton("Foto para celular em pé", reqPortrait), LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
-        col.addView(pickButton("Foto para celular deitado", reqLandscape), LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
-
-        col.addView(section("UNIDADES", accent))
-        col.addView(cycler("Medidas", Prefs.UNIT_NAMES, "units"))
-
-        col.addView(section("VEÍCULO", accent))
-        val brandInput = field("Marca (ex: Honda)", Prefs.getStr(this, "brand"))
-        val modelInput = field("Modelo (ex: CG 160 Titan)", Prefs.getStr(this, "model"))
-        col.addView(brandInput, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(8) })
-        col.addView(modelInput, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(8) })
-
-        val saveBtn = Button(this).apply {
-            text = "Salvar veículo"
-            isAllCaps = false
-            setTextColor(Color.BLACK)
-            setBackgroundColor(accent)
-            setOnClickListener {
-                Prefs.save(this@SettingsActivity, "brand", brandInput.text.toString().trim())
-                Prefs.save(this@SettingsActivity, "model", modelInput.text.toString().trim())
-                Toast.makeText(this@SettingsActivity, "Veículo salvo", Toast.LENGTH_SHORT).show()
-            }
-        }
-        col.addView(saveBtn, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(10) })
-
-        val backBtn = Button(this).apply {
-            text = "Voltar ao painel"
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0xFF14284A.toInt())
-            setOnClickListener { finish() }
-        }
-        col.addView(backBtn, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(24) })
 
         return ScrollView(this).apply {
             addView(col, ViewGroup.LayoutParams(match, wrap))
         }
     }
 
-    // Botão que abre a galeria para escolher a foto (retrato ou paisagem)
-    private fun pickButton(label: String, requestCode: Int): Button = Button(this).apply {
-        text = label
-        isAllCaps = false
-        setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF14284A.toInt())
-        setOnClickListener {
-            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "image/*"
-            }
-            this@SettingsActivity.startActivityForResult(intent, requestCode)
-        }
+    private fun titleOf(s: String?): String = when (s) {
+        "aparencia" -> "Aparência"
+        "velocimetro" -> "Velocímetro"
+        "mapa" -> "Mapa"
+        "abertura" -> "Abertura do app"
+        "unidades" -> "Unidades"
+        "veiculo" -> "Veículo"
+        else -> "Configurações"
     }
 
-    // Recebe a foto escolhida e salva no arquivo da orientação correspondente
+    // ---------- Páginas ----------
+
+    private fun addAppearance(col: LinearLayout) {
+        add(col, section("PLANO DE FUNDO"), 0)
+        add(col, cycler("Plano de fundo", Prefs.BG_NAMES, "bg"))
+        add(col, cycler("Cor do fundo", Prefs.COLOR_NAMES, "bg_c"))
+        add(col, cycler("Cor da grade", Prefs.COLOR_NAMES, "grid_c"))
+
+        add(col, section("CORES"), 0)
+        add(col, cycler("Cor de destaque", Prefs.COLOR_NAMES, "accent_c"))
+        add(col, cycler("Cor dos cartões", Prefs.COLOR_NAMES, "card_c"))
+        add(col, cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
+        add(col, cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
+        add(col, cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
+
+        add(col, plainBtn("Restaurar cores padrão") {
+            Prefs.resetColors(this)
+            Toast.makeText(this, "Cores restauradas", Toast.LENGTH_SHORT).show()
+            go("aparencia")
+        }, 20)
+    }
+
+    private fun addVelocimetro(col: LinearLayout) {
+        add(col, section("FORMATO"), 0)
+        add(col, cycler("Estilo", Prefs.GAUGE_NAMES, "gauge"))
+
+        add(col, section("CORES POR VELOCIDADE"), 0)
+        add(col, numCycler("Faixa 1 vai até", Prefs.LIMIT1_VALUES, "arc_lim1", 80, " km/h"))
+        add(col, cycler("Cor da faixa 1", Prefs.COLOR_NAMES, "arc_c1"))
+        add(col, numCycler("Faixa 2 vai até", Prefs.LIMIT2_VALUES, "arc_lim2", 120, " km/h"))
+        add(col, cycler("Cor da faixa 2", Prefs.COLOR_NAMES, "arc_c2"))
+        add(col, cycler("Cor da faixa 3 (acima da faixa 2)", Prefs.COLOR_NAMES, "arc_c3"))
+        add(col, note("Faixa 1: de 0 até o limite 1. Faixa 2: do limite 1 até o limite 2. Faixa 3: acima do limite 2. O arco inteiro muda de cor conforme a faixa em que você está."), 12)
+
+        add(col, section("NÚMEROS E TEXTOS"), 0)
+        add(col, cycler("Cor dos números", Prefs.COLOR_NAMES, "num_color"))
+        add(col, cycler("Cor do km/h", Prefs.COLOR_NAMES, "unit_color"))
+        add(col, cycler("Cor das estatísticas", Prefs.COLOR_NAMES, "stat_c"))
+    }
+
+    private fun addMapa(col: LinearLayout) {
+        add(col, section("3D"), 0)
+        add(col, cycler("Prédios 3D", arrayOf("Desligados", "Ligados"), "buildings"))
+        add(col, note("Os prédios só aparecem quando o modo 3D estiver ativado no mapa."), 12)
+    }
+
+    private fun addAbertura(col: LinearLayout) {
+        add(col, section("TELA DE ABERTURA"), 0)
+        add(col, cycler("Tela de abertura", arrayOf("Logo Ravo", "Minhas fotos", "Desligada"), "splash_mode"))
+        add(col, pickButton("Foto para celular em pé", reqPortrait), 10)
+        add(col, pickButton("Foto para celular deitado", reqLandscape), 10)
+        add(col, note("Escolha uma foto para cada posição do celular. O app mostra a certa conforme você girar."), 12)
+    }
+
+    private fun addUnidades(col: LinearLayout) {
+        add(col, section("MEDIDAS"), 0)
+        add(col, cycler("Medidas", Prefs.UNIT_NAMES, "units"))
+    }
+
+    private fun addVeiculo(col: LinearLayout) {
+        add(col, section("SEU VEÍCULO"), 0)
+        val brandInput = field("Marca (ex: Honda)", Prefs.getStr(this, "brand"))
+        val modelInput = field("Modelo (ex: CG 160 Titan)", Prefs.getStr(this, "model"))
+        add(col, brandInput, 8)
+        add(col, modelInput, 8)
+        add(col, plainBtn("Salvar veículo") {
+            Prefs.save(this, "brand", brandInput.text.toString().trim())
+            Prefs.save(this, "model", modelInput.text.toString().trim())
+            Toast.makeText(this, "Veículo salvo", Toast.LENGTH_SHORT).show()
+        }, 10)
+    }
+
+    // ---------- Fotos da abertura ----------
+
+    private fun pickButton(label: String, requestCode: Int): Button = plainBtn(label) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        startActivityForResult(intent, requestCode)
+    }
+
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -172,12 +217,42 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun section(title: String, accent: Int) = TextView(this).apply {
+    // ---------- Componentes ----------
+
+    private fun add(col: LinearLayout, v: android.view.View, topDp: Int = 10) {
+        col.addView(v, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(topDp) })
+    }
+
+    private fun section(title: String) = TextView(this).apply {
         text = title
         textSize = 13f
         setTextColor(accent)
         typeface = Typeface.DEFAULT_BOLD
         setPadding(0, dp(24), 0, 0)
+    }
+
+    private fun note(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 13f
+        setTextColor(0xFF7F93B5.toInt())
+    }
+
+    // Botão que abre uma página de configurações
+    private fun menuBtn(label: String, onClick: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        textSize = 18f
+        setTextColor(Color.WHITE)
+        setBackgroundColor(0xFF14284A.toInt())
+        setOnClickListener { onClick() }
+    }
+
+    private fun plainBtn(label: String, onClick: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        setBackgroundColor(0xFF14284A.toInt())
+        setOnClickListener { onClick() }
     }
 
     // Botão que vai trocando de opção a cada toque
@@ -190,14 +265,30 @@ class SettingsActivity : Activity() {
         b.isAllCaps = false
         b.setTextColor(Color.WHITE)
         b.setBackgroundColor(0xFF14284A.toInt())
-        b.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(10) }
         b.setOnClickListener {
             val next = (Prefs.getInt(this, key) + 1) % names.size
             Prefs.save(this, key, next)
             show(next)
+        }
+        return b
+    }
+
+    // Botão que percorre uma lista de valores numéricos (ex.: limites de km/h)
+    private fun numCycler(label: String, values: IntArray, key: String, def: Int, suffix: String): Button {
+        val b = Button(this)
+        fun cur(): Int = Prefs.intOr(this, key, def)
+        fun show() {
+            b.text = "$label: ${cur()}$suffix"
+        }
+        show()
+        b.isAllCaps = false
+        b.setTextColor(Color.WHITE)
+        b.setBackgroundColor(0xFF14284A.toInt())
+        b.setOnClickListener {
+            val idx = values.indexOf(cur())
+            val next = values[(if (idx < 0) 0 else idx + 1) % values.size]
+            Prefs.save(this, key, next)
+            show()
         }
         return b
     }
