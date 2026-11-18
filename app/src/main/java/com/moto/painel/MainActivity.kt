@@ -1547,7 +1547,7 @@ class MainActivity : Activity() {
         panelScreen.visibility = if (mode == 0) View.VISIBLE else View.GONE
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
-        musicDock.visibility = if (mode == 0) View.VISIBLE else View.GONE
+        musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
         if (mode == 2) refreshTripsList()
     }
 
@@ -2058,34 +2058,6 @@ class MainActivity : Activity() {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
-            // Controles independentes sobre o mapa central, sem cobrir a velocidade.
-            val centralControls = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-            }
-            val central3dBtn = miniBtn(modeLabel()).apply {
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(accent)
-                contentDescription = "Alternar mapa 2D e 3D"
-                setOnClickListener { toggle3D() }
-            }
-            modeBtns.add(central3dBtn)
-            val centralRotateBtn = miniBtn("").apply {
-                panelIcon(R.drawable.ravo_panel_orientation)
-                contentDescription = "Alternar orientação da tela"
-                setOnClickListener {
-                    orientMode = (orientMode + 1) % 3
-                    applyOrientation()
-                    contentDescription = "Orientação: " + orientLabel()
-                }
-            }
-            centralControls.addView(central3dBtn, LinearLayout.LayoutParams(px(44), px(40)))
-            centralControls.addView(centralRotateBtn, LinearLayout.LayoutParams(px(44), px(40)).apply {
-                topMargin = px(6)
-            })
-            addView(centralControls, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
-                topMargin = px(8)
-                rightMargin = px(6)
-            })
         }
 
         // Linha de navegação: fica numa linha só e desliza se for longa
@@ -2427,12 +2399,20 @@ class MainActivity : Activity() {
             refreshMapButtons()
         }
         mapTiltBtn = floatBtn("◈") { toggle3D() }
+        val mapRotateBtn = floatBtn("") {
+            orientMode = (orientMode + 1) % 3
+            applyOrientation()
+        }.apply {
+            panelIcon(R.drawable.ravo_panel_orientation)
+            contentDescription = "Orientação: " + orientLabel()
+        }
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
         }
         frame.addView(
             rightCol,
