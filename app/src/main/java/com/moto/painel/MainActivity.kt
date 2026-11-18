@@ -2058,6 +2058,34 @@ class MainActivity : Activity() {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
+            // Controles independentes sobre o mapa central, sem cobrir a velocidade.
+            val centralControls = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            val central3dBtn = miniBtn(modeLabel()).apply {
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(accent)
+                contentDescription = "Alternar mapa 2D e 3D"
+                setOnClickListener { toggle3D() }
+            }
+            modeBtns.add(central3dBtn)
+            val centralRotateBtn = miniBtn("").apply {
+                panelIcon(R.drawable.ravo_panel_orientation)
+                contentDescription = "Alternar orientação da tela"
+                setOnClickListener {
+                    orientMode = (orientMode + 1) % 3
+                    applyOrientation()
+                    contentDescription = "Orientação: " + orientLabel()
+                }
+            }
+            centralControls.addView(central3dBtn, LinearLayout.LayoutParams(px(44), px(40)))
+            centralControls.addView(centralRotateBtn, LinearLayout.LayoutParams(px(44), px(40)).apply {
+                topMargin = px(6)
+            })
+            addView(centralControls, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+                topMargin = px(8)
+                rightMargin = px(6)
+            })
         }
 
         // Linha de navegação: fica numa linha só e desliza se for longa
