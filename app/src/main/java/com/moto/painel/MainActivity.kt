@@ -1167,6 +1167,10 @@ class MainActivity : Activity() {
         h.style = s
         if (isNightNow()) applyNightTheme(s)
         s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
+        // Ícones próprios; registrados novamente a cada troca de estilo claro/escuro.
+        for (kind in listOf("radar", "lombada", "semaforo")) {
+            s.addImage("ravo-alert-$kind", TrafficIcons.draw(kind))
+        }
 
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
@@ -1223,71 +1227,41 @@ class MainActivity : Activity() {
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
         )
-        // Pontos fora da rota ficam discretos; sobre a rota ficam maiores.
-        val radarFilter = Expression.eq(Expression.get("type"), Expression.literal("radar"))
-        val bumpFilter = Expression.eq(Expression.get("type"), Expression.literal("lombada"))
-        val outside = Expression.eq(Expression.get("priority"), Expression.literal("other"))
-        val onRoute = Expression.eq(Expression.get("priority"), Expression.literal("route"))
+        // Ícones claros e reconhecíveis, sem bolinhas genéricas.
+        // Fora da rota discretos, na rota maiores; o próximo alerta ganha halo.
         val next = Expression.eq(Expression.get("priority"), Expression.literal("next"))
-        s.addLayer(
-            CircleLayer("radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, outside)).withProperties(
-                PropertyFactory.circleColor(0xFFFF4D4D.toInt()),
-                PropertyFactory.circleRadius(7f),
-                PropertyFactory.circleOpacity(0.65f),
-                PropertyFactory.circleStrokeColor(Color.WHITE),
-                PropertyFactory.circleStrokeWidth(1.5f)
-            )
-        )
-        s.addLayer(
-            CircleLayer("bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, outside)).withProperties(
-                PropertyFactory.circleColor(0xFFFFC107.toInt()),
-                PropertyFactory.circleRadius(6f),
-                PropertyFactory.circleOpacity(0.65f),
-                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
-                PropertyFactory.circleStrokeWidth(1.5f)
-            )
-        )
-        s.addLayer(
-            CircleLayer("route-radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, onRoute)).withProperties(
-                PropertyFactory.circleColor(0xFFFF3030.toInt()),
-                PropertyFactory.circleRadius(12f),
-                PropertyFactory.circleStrokeColor(Color.WHITE),
-                PropertyFactory.circleStrokeWidth(3f)
-            )
-        )
-        s.addLayer(
-            CircleLayer("route-bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, onRoute)).withProperties(
-                PropertyFactory.circleColor(0xFFFFC107.toInt()),
-                PropertyFactory.circleRadius(10f),
-                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
-                PropertyFactory.circleStrokeWidth(3f)
-            )
-        )
-        // Próximo obstáculo adiante tem halo de alto contraste.
         s.addLayer(
             CircleLayer("next-hazard-halo", "alerts-src").withFilter(next).withProperties(
                 PropertyFactory.circleColor(0xFFFFC107.toInt()),
-                PropertyFactory.circleRadius(20f),
+                PropertyFactory.circleRadius(24f),
                 PropertyFactory.circleOpacity(0.22f),
                 PropertyFactory.circleStrokeColor(Color.WHITE),
-                PropertyFactory.circleStrokeWidth(2.5f)
+                PropertyFactory.circleStrokeWidth(2f)
             )
         )
-        s.addLayer(
-            CircleLayer("next-radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, next)).withProperties(
-                PropertyFactory.circleColor(0xFFFF2222.toInt()),
-                PropertyFactory.circleRadius(15f),
-                PropertyFactory.circleStrokeColor(Color.WHITE),
-                PropertyFactory.circleStrokeWidth(3.5f)
-            )
-        )
-        s.addLayer(
-            CircleLayer("next-bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, next)).withProperties(
-                PropertyFactory.circleColor(0xFFFFD600.toInt()),
-                PropertyFactory.circleRadius(13f),
-                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
-                PropertyFactory.circleStrokeWidth(3.5f)
-            )
+        for (kind in listOf("radar", "lombada", "semaforo")) {
+            for (priority in listOf("other", "route", "next")) {
+                val scale = when (priority) {
+                    "next" -> 0.67f
+                    "route" -> 0.53f
+                    else -> if (kind == "semaforo") 0.28f else 0.34f
+                }
+                val alpha = if (priority == "other") 0.72f else 1f
+                s.addLayer(
+                    SymbolLayer("ravo-$kind-$priority", "alerts-src").withFilter(
+                        Expression.all(
+                            Expression.eq(Expression.get("type"), Expression.literal(kind)),
+                            Expression.eq(Expression.get("priority"), Expression.literal(priority))
+                        )
+                    ).withProperties(
+                        PropertyFactory.iconImage("ravo-alert-$kind"),
+                        PropertyFactory.iconSize(scale),
+                        PropertyFactory.iconOpacity(alpha),
+                        PropertyFactory.iconAllowOverlap(true),
+                        PropertyFactory.iconIgnorePlacement(true)
+                    )
+                )
+            }
         )
         s.addLayer(
             CircleLayer("dest-layer", "dest-src").withProperties(
