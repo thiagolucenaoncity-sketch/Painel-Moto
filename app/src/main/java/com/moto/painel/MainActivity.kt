@@ -384,6 +384,9 @@ class MainActivity : Activity() {
     private var ttsReady = false
     private var voiceOn = true
     private var lastFix: Location? = null
+    private val roadAlerts by lazy { RoadAlerts(this, { say(it) }, {
+        holders.forEach { h -> h.alertSrc?.setGeoJson(roadAlerts.features()) }
+    }) }
     private var steps: List<Step> = emptyList()
     private var stepIndex = 0
     private var announcedNear = false
@@ -485,6 +488,7 @@ class MainActivity : Activity() {
             distView.text = distText(totalM)
             tripLast = loc
             lastFix = loc
+            roadAlerts.onLocation(loc)
 
             // Primeira localização: já posiciona o mapa
             if (!firstFixDone) {
@@ -547,6 +551,7 @@ class MainActivity : Activity() {
         var meSrc: GeoJsonSource? = null
         var routeSrc: GeoJsonSource? = null
         var destSrc: GeoJsonSource? = null
+        var alertSrc: GeoJsonSource? = null
 
         init {
             view.onCreate(null)
@@ -667,6 +672,7 @@ class MainActivity : Activity() {
         locationManager.removeUpdates(locationListener)
         controller?.unregisterCallback(mediaCallback)
         tts?.shutdown()
+        roadAlerts.stop()
         destroyHolders()
         super.onDestroy()
     }
@@ -1118,12 +1124,15 @@ class MainActivity : Activity() {
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
         val ms = GeoJsonSource("me-src")
+        val alerts = GeoJsonSource("alerts-src")
+        h.alertSrc = alerts
         h.routeSrc = rs
         h.destSrc = ds
         h.meSrc = ms
         s.addSource(rs)
         s.addSource(ds)
         s.addSource(ms)
+        s.addSource(alerts)
 
         // Prédios em 3D: usa a fonte de dados vetoriais do estilo atual (se o estilo não tiver, segue em 2D)
         val vec = s.sources.firstOrNull { it is VectorSource } as? VectorSource
@@ -1168,6 +1177,22 @@ class MainActivity : Activity() {
             )
         )
         s.addLayer(
+            CircleLayer("radar-layer", "alerts-src").withFilter(Expression.eq(Expression.get("type"), Expression.literal("radar"))).withProperties(
+                PropertyFactory.circleColor(0xFFFF4D4D.toInt()),
+                PropertyFactory.circleRadius(8f),
+                PropertyFactory.circleStrokeColor(Color.WHITE),
+                PropertyFactory.circleStrokeWidth(2f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("bump-layer", "alerts-src").withFilter(Expression.eq(Expression.get("type"), Expression.literal("lombada"))).withProperties(
+                PropertyFactory.circleColor(0xFFFFC107.toInt()),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
+                PropertyFactory.circleStrokeWidth(2f)
+            )
+        )
+        s.addLayer(
             CircleLayer("dest-layer", "dest-src").withProperties(
                 PropertyFactory.circleColor(accent),
                 PropertyFactory.circleRadius(9f),
@@ -1185,6 +1210,7 @@ class MainActivity : Activity() {
         )
 
         refreshRoute(h)
+        alerts.setGeoJson(roadAlerts.features())
         lastFix?.let { loc ->
             updateMeMarker(h, loc)
             followCamera(h, loc, false)
