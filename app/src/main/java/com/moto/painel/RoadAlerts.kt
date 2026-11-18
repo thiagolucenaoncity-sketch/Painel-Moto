@@ -10,6 +10,9 @@ import org.json.JSONObject
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
+import org.maplibre.android.geometry.LatLng
+import kotlin.math.cos
+import kotlin.math.sqrt
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -32,11 +35,72 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     private val beepTimes = mutableMapOf<String, Long>()
     private var lastBeep = 0L
     private var active = true
+    private var activeRoute: List<LatLng> = emptyList()
+    private var userPosition: Location? = null
+    private var priorities: Map<String, String> = emptyMap()
+
+    // Projeção local em metros: distância lateral e progresso sobre a rota.
+    private fun project(lat: Double, lon: Double, path: List<LatLng>): Pair<Double, Double>? {
+        if (path.size < 2) return null
+        val meterLon = 111320.0 * cos(Math.toRadians(lat))
+        val meterLat = 111320.0
+        var best = Double.MAX_VALUE
+        var progress = 0.0
+        var traveled = 0.0
+        for (i in 0 until path.lastIndex) {
+            val a = path[i]
+            val b = path[i + 1]
+            val ax = (a.longitude - lon) * meterLon
+            val ay = (a.latitude - lat) * meterLat
+            val dx = (b.longitude - a.longitude) * meterLon
+            val dy = (b.latitude - a.latitude) * meterLat
+            val len2 = dx * dx + dy * dy
+            val t = if (len2 > 0.01) (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0) else 0.0
+            val distance = sqrt((ax + t * dx) * (ax + t * dx) + (ay + t * dy) * (ay + t * dy))
+            val len = sqrt(len2)
+            if (distance < best) {
+                best = distance
+                progress = traveled + t * len
+            }
+            traveled += len
+        }
+        return best to progress
+    }
+
+    fun setRoute(points: List<LatLng>) {
+        activeRoute = points.toList()
+        updatePriorities()
+    }
+
+    private fun updatePriorities() {
+        val path = activeRoute
+        val me = userPosition
+        val currentProgress = if (me != null && path.size > 1) project(me.latitude, me.longitude, path)?.second else null
+        val next = if (currentProgress != null) hazards.filter { enabled(it) }.mapNotNull { h ->
+            val match = project(h.lat, h.lon, path) ?: return@mapNotNull null
+            // Somente pontos próximos ao traçado e à frente, evitando retorno pela mesma via.
+            if (match.first > 28.0 || match.second < currentProgress + 8.0) null
+            else h.id to (match.second - currentProgress)
+        }.minByOrNull { it.second }?.first else null
+        val updated = hazards.associate { h ->
+            val nearRoute = path.size > 1 && (project(h.lat, h.lon, path)?.first ?: Double.MAX_VALUE) <= 28.0
+            h.id to when {
+                h.id == next -> "next"
+                nearRoute -> "route"
+                else -> "other"
+            }
+        }
+        if (updated != priorities) {
+            priorities = updated
+            redraw()
+        }
+    }
 
     fun stop() { active = false; tone.release(); handler.removeCallbacksAndMessages(null) }
     fun features(): FeatureCollection = FeatureCollection.fromFeatures(hazards.filter { enabled(it) }.map {
         Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)).apply {
             addStringProperty("type", it.type)
+            addStringProperty("priority", priorities[it.id] ?: "other")
         }
     })
     private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, if (h.type == "radar") "alert_radar" else "alert_bump") == 0
@@ -44,6 +108,8 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     fun onLocation(loc: Location) {
         if (!active || !loc.hasAccuracy() || loc.accuracy > 65f) return
         val now = System.currentTimeMillis()
+        userPosition = Location(loc)
+        if (activeRoute.size > 1 && hazards.isNotEmpty()) updatePriorities()
         val origin = center
         if (!fetching && (origin == null || (origin.distanceTo(loc) > 1800 && now - lastFetch > 120000) || now - lastFetch > 600000)) {
             load(loc)
@@ -116,6 +182,7 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
                     hazards = found
                     center = Location(loc)
                     warned.clear()
+                    updatePriorities()
                     redraw()
                 }
             } catch (_: Exception) {
