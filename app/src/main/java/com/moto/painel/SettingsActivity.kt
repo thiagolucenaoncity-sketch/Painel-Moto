@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -161,11 +162,14 @@ class SettingsActivity : Activity() {
 
     private fun addVeiculo(col: LinearLayout) {
         add(col, section("SEU VEÍCULO"), 0)
-        val brandInput = field("Marca (ex: Honda)", Prefs.getStr(this, "brand"))
-        val modelInput = field("Modelo (ex: CG 160 Titan)", Prefs.getStr(this, "model"))
+        val nickInput = field("Apelido (ex: JUREMA)", Prefs.getStr(this, "nick"))
+        val brandInput = field("Marca (ex: Yamaha)", Prefs.getStr(this, "brand"))
+        val modelInput = field("Modelo (ex: FZ25)", Prefs.getStr(this, "model"))
+        add(col, nickInput, 8)
         add(col, brandInput, 8)
         add(col, modelInput, 8)
         add(col, plainBtn("Salvar veículo") {
+            Prefs.save(this, "nick", nickInput.text.toString().trim())
             Prefs.save(this, "brand", brandInput.text.toString().trim())
             Prefs.save(this, "model", modelInput.text.toString().trim())
             Toast.makeText(this, "Veículo salvo", Toast.LENGTH_SHORT).show()
@@ -219,7 +223,7 @@ class SettingsActivity : Activity() {
 
     // ---------- Componentes ----------
 
-    private fun add(col: LinearLayout, v: android.view.View, topDp: Int = 10) {
+    private fun add(col: LinearLayout, v: View, topDp: Int = 10) {
         col.addView(v, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dp(topDp) })
     }
 
