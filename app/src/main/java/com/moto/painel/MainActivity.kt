@@ -1759,7 +1759,11 @@ class MainActivity : Activity() {
         voiceBtn.contentDescription = if (voiceOn) "Desativar instruções de voz" else "Ativar instruções de voz"
         val speaker = getDrawable(if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off)?.mutate()
         speaker?.setBounds(0, 0, px(24), px(24))
-        voiceBtn.setCompoundDrawables(null, speaker, null, null)
+        // Foreground fica centralizado na area inteira do botao.
+        // CompoundDrawable superior deslocava o icone para cima.
+        voiceBtn.setCompoundDrawables(null, null, null, null)
+        voiceBtn.foregroundGravity = Gravity.CENTER
+        voiceBtn.foreground = speaker
         setOn(voiceBtn, voiceOn)
         mapStyleBtn.text = when (mapMode) {
             1 -> "☀"
