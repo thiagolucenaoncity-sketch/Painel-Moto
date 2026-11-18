@@ -133,6 +133,7 @@ class SettingsActivity : Activity() {
         add(col, numCycler("Faixa 2 vai até", Prefs.LIMIT2_VALUES, "arc_lim2", 120, " km/h"))
         add(col, cycler("Cor da faixa 2", Prefs.COLOR_NAMES, "arc_c2"))
         add(col, cycler("Cor da faixa 3 (acima da faixa 2)", Prefs.COLOR_NAMES, "arc_c3"))
+        add(col, cycler("Cor do arco vazio (parte não preenchida)", Prefs.COLOR_NAMES, "arc_track"))
         add(col, note("Faixa 1: de 0 até o limite 1. Faixa 2: do limite 1 até o limite 2. Faixa 3: acima do limite 2. O arco inteiro muda de cor conforme a faixa em que você está."), 12)
 
         add(col, section("NÚMEROS E TEXTOS"), 0)
