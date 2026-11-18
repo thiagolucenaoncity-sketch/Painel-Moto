@@ -556,6 +556,11 @@ class MainActivity : Activity() {
                 map = m
                 m.uiSettings.setAllGesturesEnabled(interactive)
                 if (interactive) {
+                    // A bússola nativa fica abaixo da barra de pesquisa (48dp + 12dp),
+                    // com espaço extra para não encostar no campo de destino.
+                    m.uiSettings.setCompassMargins(px(12), px(78), px(12), px(12))
+                }
+                if (interactive) {
                     m.addOnCameraMoveStartedListener { reason ->
                         if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                             followMe = false
