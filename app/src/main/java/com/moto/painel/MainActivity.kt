@@ -1110,7 +1110,7 @@ class MainActivity : Activity() {
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
         if (isNightNow()) applyNightTheme(s)
-        s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent)))
+        s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
 
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
