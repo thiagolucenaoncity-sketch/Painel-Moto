@@ -92,14 +92,11 @@ class SplashActivity : Activity() {
             }
         }
         spinnerArea.addView(ring, FrameLayout.LayoutParams(-1, -1))
-        val bike = TextView(this).apply {
-            text = "🏍"
-            textSize = 31f
-            includeFontPadding = false
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
+        val bike = ImageView(this).apply {
+            setImageResource(R.drawable.ravo_splash_motorcycle)
+            scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        spinnerArea.addView(bike, FrameLayout.LayoutParams(-1, -1))
+        spinnerArea.addView(bike, FrameLayout.LayoutParams(dp(59), dp(59), Gravity.CENTER))
         val label = TextView(this).apply {
             text = "Carregando"
             textSize = 15f
