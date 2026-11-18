@@ -1262,7 +1262,7 @@ class MainActivity : Activity() {
                     )
                 )
             }
-        )
+        }
         s.addLayer(
             CircleLayer("dest-layer", "dest-src").withProperties(
                 PropertyFactory.circleColor(accent),
