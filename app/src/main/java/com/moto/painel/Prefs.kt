@@ -39,7 +39,7 @@ object Prefs {
     val COLOR_KEYS = arrayOf(
         "accent_c", "bg_c", "grid_c", "card_c", "clock_c",
         "label_c", "arc_c1", "arc_c2", "arc_c3", "arc_track",
-        "num_color", "unit_color", "stat_c"
+        "num_color", "unit_color", "stat_c", "marker_c"
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
