@@ -114,8 +114,6 @@ class SettingsActivity : Activity() {
         add(col, cycler("Cor dos cartões", Prefs.COLOR_NAMES, "card_c"))
         add(col, cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
         add(col, cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
-        add(col, cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
-        add(col, cycler("Cor do ícone no mapa", Prefs.COLOR_NAMES, "marker_c"))
 
         add(col, plainBtn("Restaurar cores padrão") {
             Prefs.resetColors(this)
@@ -176,6 +174,18 @@ class SettingsActivity : Activity() {
             Prefs.save(this, "model", modelInput.text.toString().trim())
             Toast.makeText(this, "Veículo salvo", Toast.LENGTH_SHORT).show()
         }, 10)
+        add(col, section("TEMA VEÍCULO"), 16)
+        add(col, note("Personalize o marcador mostrado no mapa."), 8)
+        add(col, plainBtn("Ícone no mapa: ${Prefs.MARKER_NAMES[Prefs.getInt(this, "marker").coerceIn(0, Prefs.MARKER_NAMES.lastIndex)]}") {
+            val next = (Prefs.getInt(this, "marker") + 1) % Prefs.MARKER_NAMES.size
+            Prefs.save(this, "marker", next)
+            go("veiculo")
+        }, 10)
+        add(col, cycler("Cor da moto/veículo", Prefs.COLOR_NAMES, "marker_c"))
+        if (Prefs.getInt(this, "marker") == 10) {
+            add(col, cycler("Cor da bag", Prefs.COLOR_NAMES, "bag_c"))
+            add(col, note("Cor da moto e da bag são independentes."), 8)
+        }
     }
 
     // ---------- Fotos da abertura ----------
