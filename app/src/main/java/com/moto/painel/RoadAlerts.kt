@@ -22,7 +22,12 @@ import kotlin.math.abs
  * Pontos colaborativos do OpenStreetMap via Overpass.
  * Não são dados em tempo real nem garantem cobertura completa.
  */
-class RoadAlerts(private val context: Context, private val announce: (String) -> Unit, private val redraw: () -> Unit) {
+class RoadAlerts(
+    private val context: Context,
+    private val announce: (String) -> Unit,
+    private val redraw: () -> Unit,
+    private val onStatus: (String) -> Unit = {}
+) {
     data class Hazard(val id: String, val lat: Double, val lon: Double, val type: String, val limit: String)
     private val handler = Handler(Looper.getMainLooper())
     private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
@@ -30,9 +35,10 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     private var fetching = false
     private var lastFetch = 0L
     private var center: Location? = null
+    private var attemptedCenter: Location? = null
+    private var lastErrorMessage = 0L
     private var previous: Location? = null
     private val warned = mutableSetOf<String>()
-    private val beepTimes = mutableMapOf<String, Long>()
     private var lastBeep = 0L
     private var active = true
     private var activeRoute: List<LatLng> = emptyList()
@@ -97,6 +103,17 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     }
 
     fun stop() { active = false; tone.release(); handler.removeCallbacksAndMessages(null) }
+
+    // O mapa pode ser explorado longe do GPS: consulta também a área aberta na tela.
+    fun fetchAt(lat: Double, lon: Double) {
+        if (!active || lat !in -85.0..85.0 || lon !in -180.0..180.0) return
+        val loc = Location("map").apply { latitude = lat; longitude = lon }
+        val now = System.currentTimeMillis()
+        val previousCenter = attemptedCenter
+        if (!fetching && (previousCenter == null || previousCenter.distanceTo(loc) > 2300f || now - lastFetch > 600000L) &&
+            now - lastFetch > 25000L
+        ) load(loc)
+    }
     fun features(): FeatureCollection = FeatureCollection.fromFeatures(hazards.filter { enabled(it) }.map {
         Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)).apply {
             addStringProperty("type", it.type)
@@ -106,14 +123,13 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, if (h.type == "radar") "alert_radar" else "alert_bump") == 0
 
     fun onLocation(loc: Location) {
-        if (!active || !loc.hasAccuracy() || loc.accuracy > 65f) return
+        if (!active) return
         val now = System.currentTimeMillis()
         userPosition = Location(loc)
         if (activeRoute.size > 1 && hazards.isNotEmpty()) updatePriorities()
-        val origin = center
-        if (!fetching && (origin == null || (origin.distanceTo(loc) > 1800 && now - lastFetch > 120000) || now - lastFetch > 600000)) {
-            load(loc)
-        }
+        // A consulta não depende da precisão: apenas os avisos sonoros precisam de GPS preciso.
+        fetchAt(loc.latitude, loc.longitude)
+        if (!loc.hasAccuracy() || loc.accuracy > 65f) return
         val prev = previous
         previous = Location(loc)
         if (loc.hasSpeed() && loc.speed < 1.5f) return
@@ -157,36 +173,76 @@ class RoadAlerts(private val context: Context, private val announce: (String) ->
     private fun load(loc: Location) {
         fetching = true
         lastFetch = System.currentTimeMillis()
+        attemptedCenter = Location(loc)
         val lat = loc.latitude
         val lon = loc.longitude
         Thread {
             try {
-                val q = "[out:json][timeout:15];(node(around:3500,$lat,$lon)[highway=speed_camera];node(around:3500,$lat,$lon)[traffic_calming~\"^(bump|hump|table|cushion)$\"];);out body;"
-                val url = URL("https://overpass.kumi.systems/api/interpreter?data=" + URLEncoder.encode(q, "UTF-8"))
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 10000
-                conn.readTimeout = 20000
-                conn.setRequestProperty("User-Agent", "RAVO-Navigation/1.0 (OSM road alerts)")
-                val json = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
-                conn.disconnect()
+                // Instâncias públicas Overpass podem falhar; a segunda é reserva.
+                // Consulta dentro de 5 km, abrangendo a área do mapa.
+                val query = """[out:json][timeout:25];(
+                  node(around:5000,$lat,$lon)["highway"="speed_camera"];
+                  node(around:5000,$lat,$lon)["enforcement"="maxspeed"];
+                  node(around:5000,$lat,$lon)["traffic_calming"~"^(bump|hump|table|cushion|yes)$"];
+                );out body;""".trimIndent()
+                val servers = listOf(
+                    "https://overpass.private.coffee/api/interpreter",
+                    "https://overpass-api.de/api/interpreter"
+                )
+                var result: JSONObject? = null
+                var failure: Exception? = null
+                for (server in servers) {
+                    try {
+                        val url = URL("$server?data=" + URLEncoder.encode(query, "UTF-8"))
+                        val conn = url.openConnection() as HttpURLConnection
+                        try {
+                            conn.connectTimeout = 10000
+                            conn.readTimeout = 22000
+                            conn.setRequestProperty("User-Agent", "RAVO-Android/1.0 (OpenStreetMap road alerts)")
+                            if (conn.responseCode !in 200..299) {
+                                throw java.io.IOException("Overpass HTTP ${conn.responseCode}")
+                            }
+                            val response = conn.inputStream.bufferedReader().use { it.readText() }
+                            val json = JSONObject(response)
+                            if (!json.has("elements")) throw java.io.IOException("Resposta sem elementos")
+                            result = json
+                        } finally {
+                            conn.disconnect()
+                        }
+                        break
+                    } catch (e: Exception) { failure = e }
+                }
+                val json = result ?: throw failure ?: java.io.IOException("Servidores indisponíveis")
                 val arr = json.getJSONArray("elements")
-                val found = ArrayList<Hazard>()
+                val found = LinkedHashMap<String, Hazard>()
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
                     val tags = o.optJSONObject("tags") ?: continue
-                    val kind = if (tags.optString("highway") == "speed_camera") "radar" else "lombada"
-                    found.add(Hazard(o.optString("id"), o.getDouble("lat"), o.getDouble("lon"), kind, tags.optString("maxspeed").filter { it.isDigit() }))
+                    val type = if (tags.optString("highway") == "speed_camera" ||
+                        tags.optString("enforcement") == "maxspeed") "radar" else "lombada"
+                    val id = "osm:${o.optString("type", "node")}:${o.optString("id")}"
+                    found[id] = Hazard(id, o.getDouble("lat"), o.getDouble("lon"), type,
+                        tags.optString("maxspeed").filter { it.isDigit() })
                 }
                 handler.post {
                     if (!active) return@post
-                    hazards = found
+                    hazards = found.values.toList()
                     center = Location(loc)
                     warned.clear()
+                    priorities = emptyMap()
                     updatePriorities()
                     redraw()
+                    if (hazards.isEmpty()) onStatus("Nenhum radar ou lombada cadastrado no OpenStreetMap nesta área")
                 }
-            } catch (_: Exception) {
-                // Falha de rede não deve interromper o GPS; tenta novamente depois.
+            } catch (e: Exception) {
+                handler.post {
+                    if (!active) return@post
+                    // Não apaga os pontos que já estavam no mapa em caso de falha de rede.
+                    if (System.currentTimeMillis() - lastErrorMessage > 120000L) {
+                        lastErrorMessage = System.currentTimeMillis()
+                        onStatus("Não foi possível carregar radares/lombadas. Verifique a internet.")
+                    }
+                }
             } finally {
                 handler.post { fetching = false }
             }
