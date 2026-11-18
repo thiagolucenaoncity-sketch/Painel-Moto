@@ -53,9 +53,9 @@ class SplashActivity : Activity() {
     private fun showOfficial(frame: FrameLayout) {
         val wallpaper = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            // Arquivo opcional enviado ao projeto: app/src/main/assets/ravo_splash.png
+            // Arquivo opcional enviado ao projeto: app/src/main/assets/ravo_splash.png.png
             val bitmap = try {
-                assets.open("ravo_splash.png").use { BitmapFactory.decodeStream(it) }
+                assets.open("ravo_splash.png.png").use { BitmapFactory.decodeStream(it) }
             } catch (_: Exception) { null }
             if (bitmap != null) setImageBitmap(bitmap) else setImageResource(R.mipmap.ravo_icon)
         }
