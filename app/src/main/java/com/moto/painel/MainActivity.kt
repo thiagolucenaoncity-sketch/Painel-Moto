@@ -556,6 +556,11 @@ class MainActivity : Activity() {
                 map = m
                 m.uiSettings.setAllGesturesEnabled(interactive)
                 if (interactive) {
+                    // A bússola nativa fica abaixo da barra de pesquisa (48dp + 12dp),
+                    // com espaço extra para não encostar no campo de destino.
+                    m.uiSettings.setCompassMargins(px(12), px(78), px(12), px(12))
+                }
+                if (interactive) {
                     m.addOnCameraMoveStartedListener { reason ->
                         if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                             followMe = false
@@ -849,7 +854,7 @@ class MainActivity : Activity() {
             val t = list[i]
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = box(context, cCard, 14, cBorder)
+                background = box(context, cCard, 18, withAlpha(accent, 90))
                 setPadding(px(14), px(12), px(14), px(12))
             }
             card.addView(label(16f, Color.WHITE, bold = true).apply { text = t.date })
@@ -1052,8 +1057,22 @@ class MainActivity : Activity() {
                             "road", "highway", "transport", "bridge", "tunnel", "motorway",
                             "primary", "secondary", "tertiary", "trunk", "minor", "street"
                         ).any { id.contains(it) }
-                        val c = if (isRoad) 0xFF7CC4FF.toInt() else 0xFF2A4A70.toInt()
-                        layer.setProperties(PropertyFactory.lineColor(hex(c)))
+                        // Hierarquia visual: vias locais discretas, avenidas mais claras,
+                        // expressas em destaque. Não sobrescreve o contorno das ruas.
+                        if (isRoad) {
+                            val isOutline = listOf("casing", "outline", "border").any { id.contains(it) }
+                            val roadColor = when {
+                                id.contains("motorway") || id.contains("trunk") || id.contains("express") -> 0xFFFFC66D.toInt()
+                                id.contains("primary") -> 0xFFFFD99B.toInt()
+                                id.contains("secondary") || id.contains("tertiary") -> 0xFFB5D1E5.toInt()
+                                else -> 0xFF718FA9.toInt()
+                            }
+                            layer.setProperties(PropertyFactory.lineColor(hex(
+                                if (isOutline) 0xFF253D57.toInt() else roadColor
+                            )))
+                        } else if (!id.contains("route")) {
+                            layer.setProperties(PropertyFactory.lineColor(hex(0xFF2A4A70.toInt())))
+                        }
                     }
                     is SymbolLayer -> layer.setProperties(
                         PropertyFactory.textColor(hex(0xFFD6E6FF.toInt())),
@@ -1094,7 +1113,7 @@ class MainActivity : Activity() {
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
         if (isNightNow()) applyNightTheme(s)
-        s.addImage("me-icon", styledMarker(Prefs.getInt(this, "marker"), accent))
+        s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
 
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
@@ -1130,10 +1149,22 @@ class MainActivity : Activity() {
         }
         applyBuildingVisibility(s)
 
+        // Rota laranja de alto contraste, com contorno escuro para destacar
+        // o caminho tanto no mapa claro quanto no mapa noturno.
+        s.addLayer(
+            LineLayer("route-outline-layer", "route-src").withProperties(
+                PropertyFactory.lineColor(0xFF152236.toInt()),
+                PropertyFactory.lineWidth(20f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+            )
+        )
         s.addLayer(
             LineLayer("route-layer", "route-src").withProperties(
-                PropertyFactory.lineColor(accent),
-                PropertyFactory.lineWidth(8f)
+                PropertyFactory.lineColor(0xFFFF7139.toInt()),
+                PropertyFactory.lineWidth(14f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
         )
         s.addLayer(
@@ -1519,7 +1550,7 @@ class MainActivity : Activity() {
         panelScreen.visibility = if (mode == 0) View.VISIBLE else View.GONE
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
-        musicDock.visibility = if (mode == 0) View.VISIBLE else View.GONE
+        musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
         if (mode == 2) refreshTripsList()
     }
 
@@ -1724,7 +1755,11 @@ class MainActivity : Activity() {
     // Atualiza o destaque e a visibilidade dos botões flutuantes do mapa
     private fun refreshMapButtons() {
         if (!::mapStyleBtn.isInitialized) return
-        voiceBtn.text = if (voiceOn) "♪" else "⊘"
+        voiceBtn.text = ""
+        voiceBtn.contentDescription = if (voiceOn) "Desativar instruções de voz" else "Ativar instruções de voz"
+        val speaker = getDrawable(if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off)?.mutate()
+        speaker?.setBounds(0, 0, px(24), px(24))
+        voiceBtn.setCompoundDrawables(null, speaker, null, null)
         setOn(voiceBtn, voiceOn)
         mapStyleBtn.text = when (mapMode) {
             1 -> "☀"
@@ -1879,19 +1914,40 @@ class MainActivity : Activity() {
         setTextColor(fg)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, bg, 22)
+        background = box(context, bg, 16, withAlpha(fg, 45))
         minHeight = 0
         minimumHeight = 0
     }
 
-    // Botão pequeno quadrado, para ícones
+    // Ícones vetoriais nítidos com a cor de destaque personalizada.
+    private fun Button.panelIcon(res: Int, color: Int = accent, size: Int = 21) {
+        val d = this@MainActivity.getDrawable(res)?.mutate() ?: return
+        d.setTint(color)
+        d.setBounds(0, 0, px(size), px(size))
+        if (text.isNullOrBlank()) {
+            // Drawable no foreground: centralizado na área inteira do botão,
+            // sem depender da altura da linha de texto (que deslocava o ícone).
+            setCompoundDrawables(null, null, null, null)
+            text = ""
+            setPadding(0, 0, 0, 0)
+            foregroundGravity = Gravity.CENTER
+            foreground = d
+        } else {
+            // Botões com legenda (Salvar/Zerar) mantêm ícone ao lado do texto.
+            setCompoundDrawables(d, null, null, null)
+            compoundDrawablePadding = px(5)
+        }
+        gravity = Gravity.CENTER
+    }
+
+    // Botões compactos de navegação
     private fun miniBtn(caption: String): Button = Button(this).apply {
         text = caption
         textSize = 16f
         setTextColor(Color.WHITE)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, BTN_BG, 12, BORDER)
+        background = box(context, BTN_BG, 16, withAlpha(accent, 105))
         minHeight = 0
         minimumHeight = 0
         setPadding(0, 0, 0, 0)
@@ -1901,8 +1957,8 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
         background = box(context, cCard, 14, cBorder)
-        setPadding(px(6), px(8), px(6), px(8))
-        addView(label(11f, cLabel, align = Gravity.CENTER).apply { text = title })
+        setPadding(px(6), px(12), px(6), px(12))
+        addView(label(11f, accent, bold = true, align = Gravity.CENTER).apply { text = title; letterSpacing = 0.07f })
         addView(value, LinearLayout.LayoutParams(MATCH, WRAP))
     }
 
@@ -2044,22 +2100,28 @@ class MainActivity : Activity() {
         }
 
         // Botões da trip: Iniciar/Finalizar, pausa manual (pequeno), Salvar e Zerar
-        tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f)
+        tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f).apply { typeface = Typeface.DEFAULT_BOLD }
         tripBtn.setOnClickListener {
             if (tripStarted) finishTrip() else startTrip()
         }
-        pauseBtn = miniBtn("⏸")
+        pauseBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_pause, Color.WHITE) }
         pauseBtn.textSize = 14f
         pauseBtn.setOnClickListener { toggleManualPause() }
-        saveBtn = pill("Salvar", BTN_BG, Color.WHITE, 14f)
+        saveBtn = pill("Salvar", BTN_BG, Color.WHITE, 14f).apply { panelIcon(R.drawable.ravo_panel_save, accent, 16) }
         saveBtn.setOnClickListener { saveTrip() }
-        val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f)
+        val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f).apply { panelIcon(R.drawable.ravo_panel_reset, cLabel, 16) }
         resetBtn.setOnClickListener { resetTrip() }
+        // Impede quebra de texto e distribui o espaço entre os botões em telas estreitas.
+        listOf(tripBtn, saveBtn, resetBtn).forEach {
+            it.isSingleLine = true
+            it.ellipsize = android.text.TextUtils.TruncateAt.END
+            it.includeFontPadding = false
+        }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 2f).apply { setMargins(px(4), 0, px(4), 0) })
-        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(0, 0, px(4), 0) })
-        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
-        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
+        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
+        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(36), px(44)).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1.25f).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1.15f).apply { setMargins(0, 0, px(2), 0) })
 
         // Player: capa, título e artista (fica dentro do painel flutuante)
         val card = LinearLayout(this).apply {
@@ -2147,20 +2209,20 @@ class MainActivity : Activity() {
         musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
 
         // Botões pequenos: mapa, trips salvas, configurações, 2D/3D e rotação
-        val mapBtn = miniBtn("🗺")
+        val mapBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_menu_map) }
         mapBtn.setOnClickListener { setScreen(1) }
-        val tripsBtn = miniBtn("📋")
+        val tripsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_trips) }
         tripsBtn.setOnClickListener { setScreen(2) }
-        val settingsBtn = miniBtn("⚙")
+        val settingsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_settings) }
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        val mode3dBtn = miniBtn(modeLabel())
+        val mode3dBtn = miniBtn(modeLabel()).apply { typeface = Typeface.DEFAULT_BOLD; setTextColor(accent) }
         modeBtns.add(mode3dBtn)
         mode3dBtn.setOnClickListener { toggle3D() }
-        val rotateBtn = miniBtn(orientLabel())
+        val rotateBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_orientation); contentDescription = "Orientação da tela" }
         rotateBtn.setOnClickListener {
             orientMode = (orientMode + 1) % 3
             applyOrientation()
-            rotateBtn.text = orientLabel()
+            rotateBtn.contentDescription = "Orientação: " + orientLabel()
         }
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2332,7 +2394,7 @@ class MainActivity : Activity() {
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
-        voiceBtn = floatBtn("♪") {
+        voiceBtn = floatBtn("") {
             voiceOn = !voiceOn
             if (!voiceOn) tts?.stop()
             refreshMapButtons()
@@ -2344,12 +2406,20 @@ class MainActivity : Activity() {
             refreshMapButtons()
         }
         mapTiltBtn = floatBtn("◈") { toggle3D() }
+        val mapRotateBtn = floatBtn("") {
+            orientMode = (orientMode + 1) % 3
+            applyOrientation()
+        }.apply {
+            panelIcon(R.drawable.ravo_panel_orientation)
+            contentDescription = "Orientação: " + orientLabel()
+        }
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
         }
         frame.addView(
             rightCol,

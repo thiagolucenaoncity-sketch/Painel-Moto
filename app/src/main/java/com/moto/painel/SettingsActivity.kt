@@ -67,12 +67,12 @@ class SettingsActivity : Activity() {
         })
 
         if (section == null) {
-            add(col, menuBtn("🎨  Aparência") { go("aparencia") }, 20)
-            add(col, menuBtn("🏎  Velocímetro") { go("velocimetro") }, 10)
-            add(col, menuBtn("🗺  Mapa") { go("mapa") }, 10)
-            add(col, menuBtn("🎬  Abertura do app") { go("abertura") }, 10)
-            add(col, menuBtn("📏  Unidades") { go("unidades") }, 10)
-            add(col, menuBtn("🏍  Veículo") { go("veiculo") }, 10)
+            add(col, menuBtn("Aparência", R.drawable.ravo_menu_palette) { go("aparencia") }, 20)
+            add(col, menuBtn("Velocímetro", R.drawable.ravo_menu_speed) { go("velocimetro") }, 10)
+            add(col, menuBtn("Mapa", R.drawable.ravo_menu_map) { go("mapa") }, 10)
+            add(col, menuBtn("Abertura do app", R.drawable.ravo_menu_play) { go("abertura") }, 10)
+            add(col, menuBtn("Unidades", R.drawable.ravo_menu_ruler) { go("unidades") }, 10)
+            add(col, menuBtn("Veículo", R.drawable.ravo_menu_bike) { go("veiculo") }, 10)
             add(col, plainBtn("Voltar ao painel") { finish() }, 24)
         } else {
             when (section) {
@@ -114,7 +114,6 @@ class SettingsActivity : Activity() {
         add(col, cycler("Cor dos cartões", Prefs.COLOR_NAMES, "card_c"))
         add(col, cycler("Cor do relógio", Prefs.COLOR_NAMES, "clock_c"))
         add(col, cycler("Cor dos textos", Prefs.COLOR_NAMES, "label_c"))
-        add(col, cycler("Ícone no mapa", Prefs.MARKER_NAMES, "marker"))
 
         add(col, plainBtn("Restaurar cores padrão") {
             Prefs.resetColors(this)
@@ -150,10 +149,10 @@ class SettingsActivity : Activity() {
 
     private fun addAbertura(col: LinearLayout) {
         add(col, section("TELA DE ABERTURA"), 0)
-        add(col, cycler("Tela de abertura", arrayOf("Logo Ravo", "Minhas fotos", "Desligada"), "splash_mode"))
+        add(col, cycler("Tela de abertura", arrayOf("Abertura RAVO", "RAVO + Minha Moto", "Desligada"), "splash_mode"))
         add(col, pickButton("Foto para celular em pé", reqPortrait), 10)
         add(col, pickButton("Foto para celular deitado", reqLandscape), 10)
-        add(col, note("Escolha uma foto para cada posição do celular. O app mostra a certa conforme você girar."), 12)
+        add(col, note("Na opção RAVO + Minha Moto, a abertura oficial aparece primeiro e depois sua foto. Escolha uma foto para cada posição do celular."), 12)
     }
 
     private fun addUnidades(col: LinearLayout) {
@@ -175,6 +174,18 @@ class SettingsActivity : Activity() {
             Prefs.save(this, "model", modelInput.text.toString().trim())
             Toast.makeText(this, "Veículo salvo", Toast.LENGTH_SHORT).show()
         }, 10)
+        add(col, section("TEMA VEÍCULO"), 16)
+        add(col, note("Personalize o marcador mostrado no mapa."), 8)
+        add(col, plainBtn("Ícone no mapa: ${Prefs.MARKER_NAMES[Prefs.getInt(this, "marker").coerceIn(0, Prefs.MARKER_NAMES.lastIndex)]}") {
+            val next = (Prefs.getInt(this, "marker") + 1) % Prefs.MARKER_NAMES.size
+            Prefs.save(this, "marker", next)
+            go("veiculo")
+        }, 10)
+        add(col, cycler("Cor da moto/veículo", Prefs.COLOR_NAMES, "marker_c"))
+        if (Prefs.getInt(this, "marker") == 10) {
+            add(col, cycler("Cor da bag", Prefs.COLOR_NAMES, "bag_c"))
+            add(col, note("Cor da moto e da bag são independentes."), 8)
+        }
     }
 
     // ---------- Fotos da abertura ----------
@@ -242,21 +253,45 @@ class SettingsActivity : Activity() {
         setTextColor(0xFF7F93B5.toInt())
     }
 
+    // Mesmo acabamento arredondado em todas as páginas de configurações.
+    private fun styleOptionButton(button: Button) {
+        button.isAllCaps = false
+        button.setTextColor(Color.WHITE)
+        button.gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+        button.setPadding(dp(18), dp(12), dp(18), dp(12))
+        button.minHeight = dp(56)
+        button.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF14284A.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x55000000)
+        }
+    }
+
     // Botão que abre uma página de configurações
-    private fun menuBtn(label: String, onClick: () -> Unit) = Button(this).apply {
+    private fun menuBtn(label: String, iconRes: Int, onClick: () -> Unit) = Button(this).apply {
+        val icon = getDrawable(iconRes)?.mutate()
+        icon?.setTint(accent)
+        icon?.setBounds(0, 0, dp(24), dp(24))
+        setCompoundDrawables(icon, null, null, null)
+        compoundDrawablePadding = dp(16)
+        gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+        setPadding(dp(18), dp(12), dp(18), dp(12))
+        minHeight = dp(60)
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF14284A.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x55000000)
+        }
         text = label
         isAllCaps = false
         textSize = 18f
         setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF14284A.toInt())
         setOnClickListener { onClick() }
     }
 
     private fun plainBtn(label: String, onClick: () -> Unit) = Button(this).apply {
         text = label
-        isAllCaps = false
-        setTextColor(Color.WHITE)
-        setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(this)
         setOnClickListener { onClick() }
     }
 
@@ -267,9 +302,7 @@ class SettingsActivity : Activity() {
             b.text = "$label: ${names[i]}"
         }
         show(Prefs.getInt(this, key).coerceIn(0, names.size - 1))
-        b.isAllCaps = false
-        b.setTextColor(Color.WHITE)
-        b.setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(b)
         b.setOnClickListener {
             val next = (Prefs.getInt(this, key) + 1) % names.size
             Prefs.save(this, key, next)
@@ -286,9 +319,7 @@ class SettingsActivity : Activity() {
             b.text = "$label: ${cur()}$suffix"
         }
         show()
-        b.isAllCaps = false
-        b.setTextColor(Color.WHITE)
-        b.setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(b)
         b.setOnClickListener {
             val idx = values.indexOf(cur())
             val next = values[(if (idx < 0) 0 else idx + 1) % values.size]
@@ -303,8 +334,12 @@ class SettingsActivity : Activity() {
         setText(value)
         setTextColor(Color.WHITE)
         setHintTextColor(0xFF7F93B5.toInt())
-        setBackgroundColor(0xFF14284A.toInt())
-        setPadding(dp(12), dp(12), dp(12), dp(12))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF14284A.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x55000000)
+        }
+        setPadding(dp(16), dp(14), dp(16), dp(14))
         setSingleLine(true)
     }
 }

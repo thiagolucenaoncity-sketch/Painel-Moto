@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Moto esportiva em perfil, desenhada em vetor e sem emoji -->
+    <path android:fillColor="@android:color/transparent"
+        android:strokeColor="#EAFBFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M28,67 m-11,0 a11,11 0,1 0,22 0 a11,11 0,1 0,-22 0 M72,67 m-11,0 a11,11 0,1 0,22 0 a11,11 0,1 0,-22 0"/>
+    <path android:fillColor="@android:color/transparent"
+        android:strokeColor="#32CBFF"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M28,67 L42,47 L60,47 L72,67 M28,67 L48,67 L60,47 M48,67 L41,54 M37,44 L49,44 L57,37 L69,39 L76,49 L83,52"/>
+    <path android:fillColor="#EAFBFF"
+        android:pathData="M40,41 L52,41 L61,34 L73,37 L76,42 L59,46 L45,46 Z"/>
+    <path android:fillColor="@android:color/transparent"
+        android:strokeColor="#EAFBFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M43,40 L36,33 L28,33 M66,35 L73,29 L81,29 M36,33 L32,28"/>
+    <path android:fillColor="#32CBFF"
+        android:pathData="M75,44 L84,47 L82,52 L77,51 Z"/>
+</vector>

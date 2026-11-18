@@ -8,7 +8,7 @@ object Prefs {
 
     val BG_NAMES = arrayOf("Grade azul", "Preto", "Azul degradê", "Roxo degradê")
     val GAUGE_NAMES = arrayOf("Arco", "Digital")
-    val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino")
+    val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino", "Esportiva", "Street", "Trail", "Scooter", "Custom", "Entrega")
     val UNIT_NAMES = arrayOf("km/h e km", "mph e milhas")
 
     // Paleta usada por todas as opções de cor. Índice 0 = "Padrão"
@@ -39,7 +39,7 @@ object Prefs {
     val COLOR_KEYS = arrayOf(
         "accent_c", "bg_c", "grid_c", "card_c", "clock_c",
         "label_c", "arc_c1", "arc_c2", "arc_c3", "arc_track",
-        "num_color", "unit_color", "stat_c"
+        "num_color", "unit_color", "stat_c", "marker_c", "bag_c"
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
