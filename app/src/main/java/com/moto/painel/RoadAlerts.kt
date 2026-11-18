@@ -37,6 +37,7 @@ class RoadAlerts(
     private var center: Location? = null
     private var attemptedCenter: Location? = null
     private var lastErrorMessage = 0L
+    private var lastFailure = false
     private var previous: Location? = null
     private val warned = mutableSetOf<String>()
     private var lastBeep = 0L
@@ -110,8 +111,9 @@ class RoadAlerts(
         val loc = Location("map").apply { latitude = lat; longitude = lon }
         val now = System.currentTimeMillis()
         val previousCenter = attemptedCenter
-        if (!fetching && (previousCenter == null || previousCenter.distanceTo(loc) > 2300f || now - lastFetch > 600000L) &&
-            now - lastFetch > 25000L
+        val retryDelay = if (lastFailure) 90000L else 600000L
+        if (!fetching && (previousCenter == null || previousCenter.distanceTo(loc) > 2300f || now - lastFetch > retryDelay) &&
+            now - lastFetch > (if (lastFailure) 90000L else 25000L)
         ) load(loc)
     }
     fun features(): FeatureCollection = FeatureCollection.fromFeatures(hazards.filter { enabled(it) }.map {
@@ -178,33 +180,40 @@ class RoadAlerts(
         val lon = loc.longitude
         Thread {
             try {
-                // Instâncias públicas Overpass podem falhar; a segunda é reserva.
-                // Consulta dentro de 5 km, abrangendo a área do mapa.
+                // A API pública pode ficar sobrecarregada; usa POST para evitar URL longa.
+                // Raio de 3,5 km reduz carga do servidor sem comprometer a região próxima.
                 val query = """[out:json][timeout:25];(
-                  node(around:5000,$lat,$lon)["highway"="speed_camera"];
-                  node(around:5000,$lat,$lon)["enforcement"="maxspeed"];
-                  node(around:5000,$lat,$lon)["traffic_calming"~"^(bump|hump|table|cushion|yes)$"];
+                  node(around:3500,$lat,$lon)["highway"="speed_camera"];
+                  node(around:3500,$lat,$lon)["enforcement"="maxspeed"];
+                  node(around:3500,$lat,$lon)["traffic_calming"~"^(bump|hump|table|cushion|yes)$"];
                 );out body;""".trimIndent()
                 val servers = listOf(
                     "https://overpass.private.coffee/api/interpreter",
-                    "https://overpass-api.de/api/interpreter"
+                    "https://overpass-api.de/api/interpreter",
+                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
                 )
                 var result: JSONObject? = null
                 var failure: Exception? = null
                 for (server in servers) {
                     try {
-                        val url = URL("$server?data=" + URLEncoder.encode(query, "UTF-8"))
-                        val conn = url.openConnection() as HttpURLConnection
+                        val conn = URL(server).openConnection() as HttpURLConnection
                         try {
-                            conn.connectTimeout = 10000
-                            conn.readTimeout = 22000
-                            conn.setRequestProperty("User-Agent", "RAVO-Android/1.0 (OpenStreetMap road alerts)")
-                            if (conn.responseCode !in 200..299) {
-                                throw java.io.IOException("Overpass HTTP ${conn.responseCode}")
+                            conn.requestMethod = "POST"
+                            conn.doOutput = true
+                            conn.connectTimeout = 9000
+                            conn.readTimeout = 27000
+                            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                            conn.setRequestProperty("Accept", "application/json")
+                            conn.setRequestProperty("User-Agent", "RAVO-Android/1.1 (OpenStreetMap road alerts)")
+                            val payload = ("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray(Charsets.UTF_8)
+                            conn.outputStream.use { it.write(payload) }
+                            val responseCode = conn.responseCode
+                            if (responseCode !in 200..299) {
+                                throw java.io.IOException("HTTP $responseCode em ${URL(server).host}")
                             }
                             val response = conn.inputStream.bufferedReader().use { it.readText() }
                             val json = JSONObject(response)
-                            if (!json.has("elements")) throw java.io.IOException("Resposta sem elementos")
+                            if (!json.has("elements")) throw java.io.IOException("Resposta inválida do servidor")
                             result = json
                         } finally {
                             conn.disconnect()
@@ -228,6 +237,7 @@ class RoadAlerts(
                     if (!active) return@post
                     hazards = found.values.toList()
                     center = Location(loc)
+                    lastFailure = false
                     warned.clear()
                     priorities = emptyMap()
                     updatePriorities()
@@ -237,10 +247,12 @@ class RoadAlerts(
             } catch (e: Exception) {
                 handler.post {
                     if (!active) return@post
-                    // Não apaga os pontos que já estavam no mapa em caso de falha de rede.
+                    // Preserva os dados já carregados e permite nova tentativa após 90 s.
+                    lastFailure = true
                     if (System.currentTimeMillis() - lastErrorMessage > 120000L) {
                         lastErrorMessage = System.currentTimeMillis()
-                        onStatus("Não foi possível carregar radares/lombadas. Verifique a internet.")
+                        val detail = (e.message ?: "sem resposta").take(75)
+                        onStatus("Radares indisponíveis ($detail). Nova tentativa automática.")
                     }
                 }
             } finally {
