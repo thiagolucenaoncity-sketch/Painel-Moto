@@ -3,6 +3,7 @@ package com.moto.painel
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -27,7 +28,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import android.text.Editable
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -38,6 +41,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -54,8 +58,10 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.BackgroundLayer
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillExtrusionLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -79,8 +85,7 @@ import kotlin.math.sqrt
 
 // ---------- Constantes ----------
 
-private const val LIGHT_URL = "https://tiles.openfreemap.org/styles/liberty"
-private const val DARK_URL = "https://tiles.openfreemap.org/styles/dark"
+private const val MAP_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val EMPTY_GEO = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 
 // Distância (em metros) para considerar que você saiu da rota
@@ -113,6 +118,9 @@ private fun shade(c: Int, f: Float): Int = Color.rgb(
     (Color.blue(c) * f).roundToInt()
 )
 
+// Cor no formato que o mapa entende (#RRGGBB)
+private fun hex(c: Int): String = String.format("#%06X", c and 0xFFFFFF)
+
 private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = null) = GradientDrawable().apply {
     setColor(color)
     cornerRadius = ctx.pxF(radiusDp.toFloat())
@@ -120,6 +128,12 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
 }
 
 private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
+
+// Sugestão de endereço (aparece enquanto você digita)
+private class Suggest(val name: String, val lat: Double, val lon: Double)
+
+// Endereço favorito, com apelido
+private class Fav(val nick: String, val addr: String, val lat: Double, val lon: Double)
 
 // ---------- Fundo com grade ----------
 
@@ -268,7 +282,7 @@ class MainActivity : Activity() {
     // Orientação: 0 = automático, 1 = paisagem fixa, 2 = retrato fixo
     private var orientMode = 0
 
-    // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro
+    // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro (azul noite)
     private var mapMode = 0
     private val styleBtns = ArrayList<Button>()
 
@@ -286,7 +300,7 @@ class MainActivity : Activity() {
     private var locationStarted = false
     private var firstFixDone = false
 
-    // Player flutuante: posição absoluta do botão ♪ na tela (canto superior esquerdo do botão)
+    // Player flutuante: posição absoluta do botão ♪ na tela
     private var musicOpen = false
     private lateinit var musicDock: LinearLayout
     private lateinit var musicFab: Button
@@ -324,9 +338,18 @@ class MainActivity : Activity() {
     private lateinit var mapScreen: LinearLayout
     private lateinit var fullMap: MapView
     private lateinit var searchInput: EditText
+    private lateinit var suggestScroll: ScrollView
+    private lateinit var suggestBox: LinearLayout
+    private lateinit var favChips: LinearLayout
     private lateinit var mapInstructionView: TextView
     private lateinit var mapInfoView: TextView
     private lateinit var voiceBtn: Button
+
+    // Busca: controle das sugestões
+    private var skipSuggest = false
+    private var suggestSeq = 0
+    private var suggestQuery = ""
+    private val suggestRunnable = Runnable { fetchSuggestions(suggestQuery) }
 
     // Navegação
     private var tts: TextToSpeech? = null
@@ -485,7 +508,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
-                m.setStyle(Style.Builder().fromUri(currentStyleUrl())) { s -> onStyleReady(this, s) }
+                m.setStyle(Style.Builder().fromUri(MAP_URL)) { s -> onStyleReady(this, s) }
             }
         }
     }
@@ -675,10 +698,9 @@ class MainActivity : Activity() {
         musicDock.gravity = align
 
         // Tamanho atual do bloco (player aberto ou só o botão)
-        val open = musicOpen
         val popupH = if (musicPopup.height > 0) musicPopup.height else px(200)
-        val dw = if (open) popupW else s
-        val dh = if (open) popupH + gap + s else s
+        val dw = if (musicOpen) popupW else s
+        val dh = if (musicOpen) popupH + gap + s else s
 
         var dx = if (onRight) fabX + s - dw else fabX
         var dy = if (onBottom) fabY + s - dh else fabY
@@ -695,16 +717,14 @@ class MainActivity : Activity() {
         musicDock.post { applyFabLayout() }
     }
 
-    // ---------- Estilo do mapa (claro, escuro ou automático) ----------
+    // ---------- Estilo do mapa (claro, azul noite ou automático) ----------
 
-    private fun currentStyleUrl(): String {
-        val dark = when (Prefs.getInt(this, "map_style")) {
-            1 -> false
-            2 -> true
-            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-                Configuration.UI_MODE_NIGHT_YES
-        }
-        return if (dark) DARK_URL else LIGHT_URL
+    // Modo noite: o usuário escolheu escuro, ou está automático com o celular no modo escuro
+    private fun isNightNow(): Boolean = when (Prefs.getInt(this, "map_style")) {
+        1 -> false
+        2 -> true
+        else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
     }
 
     private fun styleLabel(): String = when (mapMode) {
@@ -715,9 +735,45 @@ class MainActivity : Activity() {
 
     // Troca o estilo de todos os mapas e refaz as camadas (rota, posição, prédios)
     private fun applyMapStyle() {
-        val url = currentStyleUrl()
         holders.forEach { h ->
-            h.map?.setStyle(Style.Builder().fromUri(url)) { s -> onStyleReady(h, s) }
+            h.map?.setStyle(Style.Builder().fromUri(MAP_URL)) { s -> onStyleReady(h, s) }
+        }
+    }
+
+    // Modo azul noite: fundo azul escuro, água mais escura, vias bem claras e nomes legíveis
+    private fun applyNightTheme(s: Style) {
+        for (layer in s.layers) {
+            val id = layer.id.lowercase(Locale.ROOT)
+            try {
+                when (layer) {
+                    is BackgroundLayer -> layer.setProperties(
+                        PropertyFactory.backgroundColor(hex(0xFF0B1A2E.toInt()))
+                    )
+                    is FillLayer -> {
+                        val c = when {
+                            id.contains("water") -> 0xFF0E2F55.toInt()
+                            id.contains("park") || id.contains("wood") ||
+                                id.contains("grass") || id.contains("landuse") -> 0xFF10283F.toInt()
+                            else -> 0xFF13243D.toInt()
+                        }
+                        layer.setProperties(PropertyFactory.fillColor(hex(c)))
+                    }
+                    is LineLayer -> {
+                        val isRoad = listOf(
+                            "road", "highway", "transport", "bridge", "tunnel", "motorway",
+                            "primary", "secondary", "tertiary", "trunk", "minor", "street"
+                        ).any { id.contains(it) }
+                        val c = if (isRoad) 0xFF7CC4FF.toInt() else 0xFF2A4A70.toInt()
+                        layer.setProperties(PropertyFactory.lineColor(hex(c)))
+                    }
+                    is SymbolLayer -> layer.setProperties(
+                        PropertyFactory.textColor(hex(0xFFD6E6FF.toInt())),
+                        PropertyFactory.textHaloColor(hex(0xFF0B1A2E.toInt()))
+                    )
+                }
+            } catch (e: Exception) {
+                // Se alguma camada não aceitar a cor, ela continua com a cor original
+            }
         }
     }
 
@@ -735,6 +791,7 @@ class MainActivity : Activity() {
 
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
+        if (isNightNow()) applyNightTheme(s)
         s.addImage("me-icon", styledMarker(Prefs.getInt(this, "marker"), accent))
 
         val rs = GeoJsonSource("route-src")
@@ -891,6 +948,235 @@ class MainActivity : Activity() {
         holders.forEach { followCamera(it, loc, true) }
     }
 
+    // ---------- Busca e sugestões ----------
+
+    private val searchWatcher = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        override fun afterTextChanged(s: Editable?) {
+            if (skipSuggest) {
+                skipSuggest = false
+                return
+            }
+            scheduleSuggest(s?.toString() ?: "")
+        }
+    }
+
+    // Espera um pouco depois de cada letra antes de buscar (para não sobrecarregar o servidor)
+    private fun scheduleSuggest(q: String) {
+        suggestQuery = q.trim()
+        handler.removeCallbacks(suggestRunnable)
+        if (suggestQuery.length < 3) {
+            hideSuggestions()
+            return
+        }
+        handler.postDelayed(suggestRunnable, 450)
+    }
+
+    private fun fetchSuggestions(q: String) {
+        val seq = ++suggestSeq
+        Thread {
+            try {
+                val arr = JSONArray(
+                    getText(
+                        "https://nominatim.openstreetmap.org/search?format=json&limit=5&q=" +
+                            URLEncoder.encode(q, "UTF-8")
+                    )
+                )
+                val list = ArrayList<Suggest>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    list.add(Suggest(o.optString("display_name"), o.getDouble("lat"), o.getDouble("lon")))
+                }
+                handler.post { if (seq == suggestSeq) showSuggestions(list) }
+            } catch (e: Exception) {
+                handler.post { if (seq == suggestSeq) hideSuggestions() }
+            }
+        }.start()
+    }
+
+    private fun showSuggestions(list: List<Suggest>) {
+        if (!::suggestBox.isInitialized) return
+        suggestBox.removeAllViews()
+        if (list.isEmpty()) {
+            hideSuggestions()
+            return
+        }
+        for (sg in list) {
+            suggestBox.addView(
+                TextView(this).apply {
+                    text = sg.name
+                    textSize = 15f
+                    setTextColor(Color.WHITE)
+                    setPadding(px(12), px(10), px(12), px(10))
+                    setOnClickListener {
+                        skipSuggest = true
+                        searchInput.setText(sg.name)
+                        searchInput.setSelection(sg.name.length)
+                        hideSuggestions()
+                        routeTo(sg.lat, sg.lon, sg.name)
+                    }
+                },
+                LinearLayout.LayoutParams(MATCH, WRAP)
+            )
+        }
+        suggestScroll.visibility = View.VISIBLE
+    }
+
+    private fun hideSuggestions() {
+        if (!::suggestBox.isInitialized) return
+        suggestBox.removeAllViews()
+        suggestScroll.visibility = View.GONE
+    }
+
+    // Pesquisa o texto digitado e traça a rota para o primeiro resultado
+    private fun go() {
+        val q = searchInput.text.toString().trim()
+        if (q.isEmpty()) return
+        hideSuggestions()
+        if (lastFix == null) {
+            toast("Aguardando sinal do GPS...")
+            return
+        }
+        toast("Buscando rota...")
+
+        Thread {
+            try {
+                val geo = JSONArray(
+                    getText(
+                        "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+                            URLEncoder.encode(q, "UTF-8")
+                    )
+                )
+                if (geo.length() == 0) {
+                    handler.post { toast("Endereço não encontrado") }
+                    return@Thread
+                }
+                val hit = geo.getJSONObject(0)
+                val destLat = hit.getDouble("lat")
+                val destLon = hit.getDouble("lon")
+                val name = hit.optString("display_name", q)
+                handler.post { routeTo(destLat, destLon, name) }
+            } catch (e: Exception) {
+                handler.post { toast("Não consegui calcular a rota. Verifique a internet.") }
+            }
+        }.start()
+    }
+
+    // Traça a rota da sua posição até um ponto (usado pela busca, sugestões e favoritos)
+    private fun routeTo(lat: Double, lon: Double, name: String) {
+        val origin = lastFix
+        if (origin == null) {
+            toast("Aguardando sinal do GPS...")
+            return
+        }
+        toast("Buscando rota...")
+        fetchRoute(origin, lat, lon, name.take(60), false)
+    }
+
+    // ---------- Favoritos (endereço + apelido) ----------
+
+    private fun favPrefs() = getSharedPreferences("favoritos", MODE_PRIVATE)
+
+    private fun loadFavs(): MutableList<Fav> {
+        val out = ArrayList<Fav>()
+        try {
+            val arr = JSONArray(favPrefs().getString("list", "[]") ?: "[]")
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                out.add(Fav(o.getString("nick"), o.getString("addr"), o.getDouble("lat"), o.getDouble("lon")))
+            }
+        } catch (e: Exception) {
+            // Se os dados estiverem corrompidos, começa a lista vazia
+        }
+        return out
+    }
+
+    private fun saveFavs(list: List<Fav>) {
+        val arr = JSONArray()
+        list.forEach {
+            arr.put(
+                JSONObject()
+                    .put("nick", it.nick)
+                    .put("addr", it.addr)
+                    .put("lat", it.lat)
+                    .put("lon", it.lon)
+            )
+        }
+        favPrefs().edit().putString("list", arr.toString()).apply()
+    }
+
+    // Recria os botões de favoritos na barra do mapa
+    private fun refreshFavChips() {
+        if (!::favChips.isInitialized) return
+        favChips.removeAllViews()
+        loadFavs().forEach { f ->
+            favChips.addView(
+                Button(this).apply {
+                    text = "★ ${f.nick}"
+                    textSize = 13f
+                    isAllCaps = false
+                    setTextColor(Color.WHITE)
+                    background = box(context, BTN_BG, 16, BORDER)
+                    minHeight = 0
+                    minimumHeight = 0
+                    setOnClickListener {
+                        skipSuggest = true
+                        searchInput.setText(f.addr)
+                        hideSuggestions()
+                        routeTo(f.lat, f.lon, f.addr)
+                    }
+                    setOnLongClickListener {
+                        confirmRemoveFav(f)
+                        true
+                    }
+                },
+                LinearLayout.LayoutParams(WRAP, px(40)).apply { setMargins(px(4), 0, px(4), 0) }
+            )
+        }
+    }
+
+    // Salva o destino atual como favorito, com um apelido escolhido por você
+    private fun askFavNick() {
+        val dest = routeDest
+        if (dest == null) {
+            toast("Escolha um destino primeiro")
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "Ex: Casa, Trabalho"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Salvar favorito")
+            .setView(input)
+            .setPositiveButton("Salvar") { _, _ ->
+                val nick = input.text.toString().trim()
+                if (nick.isEmpty()) {
+                    toast("Digite um apelido")
+                    return@setPositiveButton
+                }
+                val list = loadFavs()
+                list.add(Fav(nick, routeName, dest.latitude, dest.longitude))
+                saveFavs(list)
+                refreshFavChips()
+                toast("Favorito salvo")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun confirmRemoveFav(f: Fav) {
+        AlertDialog.Builder(this)
+            .setTitle("Remover ${f.nick}?")
+            .setPositiveButton("Remover") { _, _ ->
+                saveFavs(loadFavs().filterNot { it.nick == f.nick && it.addr == f.addr })
+                refreshFavChips()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     // ---------- Orientação ----------
 
     private fun applyOrientation() {
@@ -1013,39 +1299,6 @@ class MainActivity : Activity() {
         navView.text = "➜ $main"
         navView.visibility = if (main.isEmpty()) View.GONE else View.VISIBLE
         navView.isSelected = true
-    }
-
-    private fun go() {
-        val q = searchInput.text.toString().trim()
-        if (q.isEmpty()) return
-        val origin = lastFix
-        if (origin == null) {
-            toast("Aguardando sinal do GPS...")
-            return
-        }
-        toast("Buscando rota...")
-
-        Thread {
-            try {
-                val geo = JSONArray(
-                    getText(
-                        "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-                            URLEncoder.encode(q, "UTF-8")
-                    )
-                )
-                if (geo.length() == 0) {
-                    handler.post { toast("Endereço não encontrado") }
-                    return@Thread
-                }
-                val hit = geo.getJSONObject(0)
-                val destLat = hit.getDouble("lat")
-                val destLon = hit.getDouble("lon")
-                val name = hit.optString("display_name", q).take(60)
-                handler.post { fetchRoute(origin, destLat, destLon, name, false) }
-            } catch (e: Exception) {
-                handler.post { toast("Não consegui calcular a rota. Verifique a internet.") }
-            }
-        }.start()
     }
 
     // Busca a rota (usada na primeira vez e também no recálculo)
@@ -1623,11 +1876,11 @@ class MainActivity : Activity() {
             setBackgroundColor(0xFF06142B.toInt())
         }
 
-        // Barra de busca, 2D/3D, centralizar (◎) e voltar ao painel
-        val topRow = LinearLayout(this).apply {
+        // Campo de busca ocupa a largura toda, com o botão Ir ao lado
+        val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(8), px(8), px(8), px(8))
+            setPadding(px(8), px(8), px(8), px(4))
         }
         searchInput = EditText(this).apply {
             hint = "Para onde? ex: Av. Paulista, 1000"
@@ -1637,6 +1890,7 @@ class MainActivity : Activity() {
             setPadding(px(12), px(10), px(12), px(10))
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
+            addTextChangedListener(searchWatcher)
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                     go()
@@ -1648,22 +1902,44 @@ class MainActivity : Activity() {
             text = "Ir"
             setOnClickListener { go() }
         }
-        val mode3dBtn = miniBtn(modeLabel())
-        modeBtns.add(mode3dBtn)
-        mode3dBtn.setOnClickListener { toggle3D() }
-        val centerBtn = miniBtn("◎")
-        centerBtn.setOnClickListener { recenter() }
-        val backBtn = Button(this).apply {
-            text = "Painel"
-            setOnClickListener { setScreen(false) }
-        }
-        topRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
-        topRow.addView(goBtn, LinearLayout.LayoutParams(WRAP, WRAP))
-        topRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        topRow.addView(centerBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        topRow.addView(backBtn, LinearLayout.LayoutParams(WRAP, WRAP))
+        searchRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
+        searchRow.addView(goBtn, LinearLayout.LayoutParams(px(64), WRAP).apply { setMargins(px(6), 0, 0, 0) })
 
-        // Cartão de manobra no topo do mapa (instrução grande e distância restante)
+        // Lista de sugestões (aparece enquanto você digita)
+        suggestBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(cCard)
+        }
+        suggestScroll = ScrollView(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(cCard)
+            addView(suggestBox)
+        }
+
+        // Favoritos: botões com apelido e botão ★ para salvar o destino atual
+        favChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val favScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(favChips)
+        }
+        val starBtn = miniBtn("★")
+        starBtn.setOnClickListener { askFavNick() }
+        val favRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(8), 0, px(8), px(4))
+        }
+        favRow.addView(favScroll, LinearLayout.LayoutParams(0, WRAP, 1f))
+        favRow.addView(starBtn, LinearLayout.LayoutParams(px(44), px(40)))
+
+        val topCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(searchRow, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(suggestScroll, LinearLayout.LayoutParams(MATCH, px(220)))
+            addView(favRow, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+
+        // Cartão de manobra (instrução grande e distância restante)
         mapInstructionView = label(20f, Color.WHITE, bold = true).apply {
             text = "Digite um destino acima"
             maxLines = 2
@@ -1680,7 +1956,7 @@ class MainActivity : Activity() {
         // Mapa completo
         fullMap = newMap(true)
 
-        // Botões embaixo do mapa: voz, cancelar rota e estilo (A / ☀ / ☾)
+        // Linha 1 embaixo do mapa: voz, cancelar rota e estilo (A / ☀ / ☾)
         voiceBtn = Button(this).apply { text = if (voiceOn) "Voz: ligada" else "Voz: desligada" }
         voiceBtn.setOnClickListener {
             voiceOn = !voiceOn
@@ -1699,24 +1975,44 @@ class MainActivity : Activity() {
             styleBtns.forEach { it.text = styleLabel() }
             applyMapStyle()
         }
-        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnRow.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        btnRow.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        btnRow.addView(styleBtn, LinearLayout.LayoutParams(px(48), px(44)))
+        val rowA = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowA.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        rowA.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
+        rowA.addView(styleBtn, LinearLayout.LayoutParams(px(48), px(44)))
+
+        // Linha 2 embaixo do mapa: 3D, centralizar (◎) e voltar ao painel
+        val mode3dBtn = miniBtn(modeLabel())
+        modeBtns.add(mode3dBtn)
+        mode3dBtn.setOnClickListener { toggle3D() }
+        val centerBtn = miniBtn("◎")
+        centerBtn.setOnClickListener { recenter() }
+        val backBtn = pill("Painel", BTN_BG, Color.WHITE, 14f)
+        backBtn.setOnClickListener { setScreen(false) }
+        val rowB = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        rowB.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        rowB.addView(centerBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
+        rowB.addView(backBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
+
         val attrib = label(10f, cLabel).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
 
         val bottomCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(cCard)
             setPadding(px(12), px(8), px(12), px(8))
-            addView(btnRow, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(rowA, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(rowB, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
             addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
         }
 
-        root.addView(topRow, LinearLayout.LayoutParams(MATCH, WRAP))
+        root.addView(topCol, LinearLayout.LayoutParams(MATCH, WRAP))
         root.addView(navCard, LinearLayout.LayoutParams(MATCH, WRAP))
         root.addView(fullMap, LinearLayout.LayoutParams(MATCH, 0, 1f))
         root.addView(bottomCard, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        refreshFavChips()
         return root
     }
 }
