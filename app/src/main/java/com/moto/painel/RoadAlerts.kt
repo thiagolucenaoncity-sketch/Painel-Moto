@@ -6,16 +6,12 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Handler
 import android.os.Looper
-import org.json.JSONObject
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
 import org.maplibre.android.geometry.LatLng
 import kotlin.math.cos
 import kotlin.math.sqrt
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 import kotlin.math.abs
 
 /**
@@ -28,7 +24,7 @@ class RoadAlerts(
     private val redraw: () -> Unit,
     private val onStatus: (String) -> Unit = {}
 ) {
-    data class Hazard(val id: String, val lat: Double, val lon: Double, val type: String, val limit: String)
+    data class Hazard(val id: String, val lat: Double, val lon: Double, val type: String, val limit: String, val direction: Float? = null)
     private val handler = Handler(Looper.getMainLooper())
     private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
     private var hazards: List<Hazard> = emptyList()
@@ -38,6 +34,7 @@ class RoadAlerts(
     private var attemptedCenter: Location? = null
     private var lastErrorMessage = 0L
     private var lastFailure = false
+    @Volatile private var bundled: List<Hazard>? = null
     private var previous: Location? = null
     private val warned = mutableSetOf<String>()
     private var lastBeep = 0L
@@ -145,9 +142,14 @@ class RoadAlerts(
                 if (prev.distanceTo(p) < d - 8) return@filter false
             }
             if (loc.hasBearing() && loc.speed > 2f) {
-                val p = Location("osm").apply { latitude = h.lat; longitude = h.lon }
+                val p = Location("database").apply { latitude = h.lat; longitude = h.lon }
                 val angle = abs(((loc.bearing - loc.bearingTo(p) + 540f) % 360f) - 180f)
                 if (angle > 65f) return@filter false
+                // Quando a base conhece o sentido fiscalizado, evita apitar na pista oposta.
+                if (h.direction != null) {
+                    val wrongDirection = abs(((loc.bearing - h.direction + 540f) % 360f) - 180f)
+                    if (wrongDirection > 60f) return@filter false
+                }
             }
             true
         }.sortedBy { it.second }
@@ -172,6 +174,33 @@ class RoadAlerts(
         }
     }
 
+    private fun readBundled(): List<Hazard> {
+        bundled?.let { return it }
+        val points = ArrayList<Hazard>()
+        context.assets.open("roadalerts/sp_radares.csv").bufferedReader().useLines { lines ->
+            lines.drop(1).forEachIndexed { i, line ->
+                val columns = line.split(',')
+                if (columns.size < 9 || columns[5] != "1") return@forEachIndexed
+                val lat = columns[0].toDoubleOrNull() ?: return@forEachIndexed
+                val lon = columns[1].toDoubleOrNull() ?: return@forEachIndexed
+                // Inclui radares FIXED, SECTION e RED_LIGHT, todos tratados como radar.
+                points.add(Hazard("pardal:radar:$i", lat, lon, "radar",
+                    columns[3].filter { it.isDigit() }, columns[8].toFloatOrNull()))
+            }
+        }
+        context.assets.open("roadalerts/sp_lombadas.csv").bufferedReader().useLines { lines ->
+            lines.drop(1).forEachIndexed { i, line ->
+                val c = line.split(',')
+                if (c.size < 3 || c[2] == "RUMBLE_STRIP") return@forEachIndexed
+                val lat = c[0].toDoubleOrNull() ?: return@forEachIndexed
+                val lon = c[1].toDoubleOrNull() ?: return@forEachIndexed
+                points.add(Hazard("pardal:lombada:$i", lat, lon, "lombada", ""))
+            }
+        }
+        bundled = points
+        return points
+    }
+
     private fun load(loc: Location) {
         fetching = true
         lastFetch = System.currentTimeMillis()
@@ -180,79 +209,34 @@ class RoadAlerts(
         val lon = loc.longitude
         Thread {
             try {
-                // A API pública pode ficar sobrecarregada; usa POST para evitar URL longa.
-                // Raio de 3,5 km reduz carga do servidor sem comprometer a região próxima.
-                val query = """[out:json][timeout:25];(
-                  node(around:3500,$lat,$lon)["highway"="speed_camera"];
-                  node(around:3500,$lat,$lon)["enforcement"="maxspeed"];
-                  node(around:3500,$lat,$lon)["traffic_calming"~"^(bump|hump|table|cushion|yes)$"];
-                );out body;""".trimIndent()
-                val servers = listOf(
-                    "https://overpass.private.coffee/api/interpreter",
-                    "https://overpass-api.de/api/interpreter",
-                    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
-                )
-                var result: JSONObject? = null
-                var failure: Exception? = null
-                for (server in servers) {
-                    try {
-                        val conn = URL(server).openConnection() as HttpURLConnection
-                        try {
-                            conn.requestMethod = "POST"
-                            conn.doOutput = true
-                            conn.connectTimeout = 9000
-                            conn.readTimeout = 27000
-                            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                            conn.setRequestProperty("Accept", "application/json")
-                            conn.setRequestProperty("User-Agent", "RAVO-Android/1.1 (OpenStreetMap road alerts)")
-                            val payload = ("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray(Charsets.UTF_8)
-                            conn.outputStream.use { it.write(payload) }
-                            val responseCode = conn.responseCode
-                            if (responseCode !in 200..299) {
-                                throw java.io.IOException("HTTP $responseCode em ${URL(server).host}")
-                            }
-                            val response = conn.inputStream.bufferedReader().use { it.readText() }
-                            val json = JSONObject(response)
-                            if (!json.has("elements")) throw java.io.IOException("Resposta inválida do servidor")
-                            result = json
-                        } finally {
-                            conn.disconnect()
-                        }
-                        break
-                    } catch (e: Exception) { failure = e }
-                }
-                val json = result ?: throw (failure ?: java.io.IOException("Servidores indisponíveis"))
-                val arr = json.getJSONArray("elements")
-                val found = LinkedHashMap<String, Hazard>()
-                for (i in 0 until arr.length()) {
-                    val o = arr.getJSONObject(i)
-                    val tags = o.optJSONObject("tags") ?: continue
-                    val type = if (tags.optString("highway") == "speed_camera" ||
-                        tags.optString("enforcement") == "maxspeed") "radar" else "lombada"
-                    val id = "osm:${o.optString("type", "node")}:${o.optString("id")}"
-                    found[id] = Hazard(id, o.getDouble("lat"), o.getDouble("lon"), type,
-                        tags.optString("maxspeed").filter { it.isDigit() })
+                val source = readBundled()
+                // Apenas os pontos na região exibida entram nas camadas; o banco
+                // completo do estado permanece guardado e disponível sem internet.
+                val near = source.filter { h ->
+                    val latMeters = (h.lat - lat) * 111320.0
+                    val lonMeters = (h.lon - lon) * 111320.0 * cos(Math.toRadians(lat))
+                    latMeters * latMeters + lonMeters * lonMeters <= 5500.0 * 5500.0
                 }
                 handler.post {
                     if (!active) return@post
-                    hazards = found.values.toList()
+                    hazards = near
                     center = Location(loc)
                     lastFailure = false
                     warned.clear()
                     priorities = emptyMap()
                     updatePriorities()
                     redraw()
-                    if (hazards.isEmpty()) onStatus("Nenhum radar ou lombada cadastrado no OpenStreetMap nesta área")
+                    if (near.isEmpty()) {
+                        onStatus("Sem pontos cadastrados nesta região da base offline de SP")
+                    }
                 }
             } catch (e: Exception) {
                 handler.post {
                     if (!active) return@post
-                    // Preserva os dados já carregados e permite nova tentativa após 90 s.
                     lastFailure = true
                     if (System.currentTimeMillis() - lastErrorMessage > 120000L) {
                         lastErrorMessage = System.currentTimeMillis()
-                        val detail = (e.message ?: "sem resposta").take(75)
-                        onStatus("Radares indisponíveis ($detail). Nova tentativa automática.")
+                        onStatus("Erro ao ler banco local de radares: ${(e.message ?: "desconhecido").take(60)}")
                     }
                 }
             } finally {
