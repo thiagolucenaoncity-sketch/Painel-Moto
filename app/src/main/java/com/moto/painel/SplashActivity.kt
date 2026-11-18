@@ -6,14 +6,17 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.SweepGradient
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.ViewGroup
+import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -25,7 +28,6 @@ class SplashActivity : Activity() {
     private var done = false
     private var spinner: ObjectAnimator? = null
     private var dots: ValueAnimator? = null
-    private var root: FrameLayout? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -37,7 +39,6 @@ class SplashActivity : Activity() {
             return
         }
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.rgb(2, 12, 30)) }
-        root = frame
         setContentView(frame)
         showOfficial(frame)
         frame.setOnClickListener { goNext() }
@@ -47,7 +48,7 @@ class SplashActivity : Activity() {
             } else {
                 goNext()
             }
-        }, 1500L)
+        }, 3000L)
     }
 
     private fun showOfficial(frame: FrameLayout) {
@@ -67,20 +68,38 @@ class SplashActivity : Activity() {
         }
         frame.addView(loading, lp)
 
-        val ring = TextView(this).apply {
-            text = "◌"
-            textSize = 70f
-            setTextColor(Color.CYAN)
-            gravity = Gravity.CENTER
+        // Um único centro geométrico para o anel e a moto.
+        val spinnerArea = FrameLayout(this)
+        loading.addView(spinnerArea, FrameLayout.LayoutParams(dp(90), dp(90), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        val ring = object : View(this) {
+            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = dp(7).toFloat()
+                strokeCap = Paint.Cap.ROUND
+            }
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                val cx = width / 2f
+                val cy = height / 2f
+                val radius = (minOf(width, height) - dp(12)) / 2f
+                paint.shader = SweepGradient(cx, cy, intArrayOf(
+                    Color.argb(18, 0, 190, 255),
+                    Color.argb(100, 0, 160, 255),
+                    Color.rgb(0, 224, 255),
+                    Color.rgb(115, 244, 255)
+                ), floatArrayOf(0f, 0.35f, 0.75f, 1f))
+                canvas.drawCircle(cx, cy, radius, paint)
+            }
         }
-        loading.addView(ring, FrameLayout.LayoutParams(dp(90), dp(90), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        spinnerArea.addView(ring, FrameLayout.LayoutParams(-1, -1))
         val bike = TextView(this).apply {
             text = "🏍"
             textSize = 31f
+            includeFontPadding = false
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
         }
-        loading.addView(bike, FrameLayout.LayoutParams(dp(90), dp(90), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        spinnerArea.addView(bike, FrameLayout.LayoutParams(-1, -1))
         val label = TextView(this).apply {
             text = "Carregando"
             textSize = 15f
@@ -91,7 +110,7 @@ class SplashActivity : Activity() {
         loading.addView(label, FrameLayout.LayoutParams(-1, dp(32), Gravity.BOTTOM))
 
         spinner = ObjectAnimator.ofFloat(ring, "rotation", 0f, 360f).apply {
-            duration = 1400L
+            duration = 1800L
             repeatCount = ValueAnimator.INFINITE
             start()
         }
