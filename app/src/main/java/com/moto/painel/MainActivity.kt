@@ -9,11 +9,9 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -143,7 +141,7 @@ class GridView(ctx: Context, lineColor: Int) : View(ctx) {
     }
 }
 
-// ---------- Arco de velocidade ----------
+// ---------- Arco de velocidade (cor muda por faixa de velocidade) ----------
 
 class SpeedArcView(ctx: Context) : View(ctx) {
     var speed: Float = 0f
@@ -152,7 +150,21 @@ class SpeedArcView(ctx: Context) : View(ctx) {
             invalidate()
         }
 
-    var arcColor: Int = BLUE
+    // Cores das três faixas e os limites (km/h) entre elas
+    private var c1 = BLUE
+    private var c2 = YELLOW
+    private var c3 = RED
+    private var lim1 = 80
+    private var lim2 = 120
+
+    fun setZones(color1: Int, color2: Int, color3: Int, limit1: Int, limit2: Int) {
+        c1 = color1
+        c2 = color2
+        c3 = color3
+        lim1 = limit1
+        lim2 = limit2
+        invalidate()
+    }
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -181,10 +193,11 @@ class SpeedArcView(ctx: Context) : View(ctx) {
 
         val frac = (speed / 200f).coerceIn(0f, 1f)
         if (frac > 0f) {
+            // A cor do arco é a da faixa em que a velocidade atual está
             arcPaint.color = when {
-                speed > 120f -> RED
-                speed > 80f -> YELLOW
-                else -> arcColor
+                speed <= lim1 -> c1
+                speed <= lim2 -> c2
+                else -> c3
             }
             canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
         }
@@ -234,7 +247,11 @@ class MainActivity : Activity() {
 
     // Cores (carregadas das Configurações)
     private var accent = BLUE
-    private var cArc = BLUE
+    private var cArc1 = BLUE
+    private var cArc2 = YELLOW
+    private var cArc3 = RED
+    private var arcLim1 = 80
+    private var arcLim2 = 120
     private var cNum = Color.WHITE
     private var cUnit = GRAY
     private var cLabel = GRAY
@@ -269,15 +286,17 @@ class MainActivity : Activity() {
     private var locationStarted = false
     private var firstFixDone = false
 
-    // Player flutuante: o botão e o painel formam um bloco que se arrasta junto
+    // Player flutuante: posição absoluta do botão ♪ na tela (canto superior esquerdo do botão)
     private var musicOpen = false
     private lateinit var musicDock: LinearLayout
     private lateinit var musicFab: Button
     private lateinit var musicPopup: LinearLayout
-    private var fabDX = 0f
-    private var fabDY = 0f
-    private var fabDownX = 0f
-    private var fabDownY = 0f
+    private var fabX = -1f
+    private var fabY = -1f
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var startFabX = 0f
+    private var startFabY = 0f
     private var fabMoved = false
 
     // Painel
@@ -408,26 +427,31 @@ class MainActivity : Activity() {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
-    // Toque no botão ♪: arrastar move o bloco inteiro; um toque simples abre ou fecha o player
+    // Toque no botão ♪: arrastar move o botão (e o player junto); um toque simples abre ou fecha o player
     private val fabTouch = View.OnTouchListener { _, e ->
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                fabDX = musicDock.translationX - e.rawX
-                fabDY = musicDock.translationY - e.rawY
-                fabDownX = e.rawX
-                fabDownY = e.rawY
+                downRawX = e.rawX
+                downRawY = e.rawY
+                startFabX = fabX
+                startFabY = fabY
                 fabMoved = false
                 true
             }
             MotionEvent.ACTION_MOVE -> {
-                if (abs(e.rawX - fabDownX) > 12 || abs(e.rawY - fabDownY) > 12) fabMoved = true
-                if (fabMoved) applyDockPos(e.rawX + fabDX, e.rawY + fabDY)
+                if (abs(e.rawX - downRawX) > 12 || abs(e.rawY - downRawY) > 12) fabMoved = true
+                if (fabMoved) {
+                    fabX = startFabX + (e.rawX - downRawX)
+                    fabY = startFabY + (e.rawY - downRawY)
+                    applyFabLayout()
+                }
                 true
             }
             MotionEvent.ACTION_UP -> {
                 if (fabMoved) {
-                    Prefs.putRaw(this@MainActivity, "fab_x", musicDock.translationX.roundToInt())
-                    Prefs.putRaw(this@MainActivity, "fab_y", musicDock.translationY.roundToInt())
+                    Prefs.putRaw(this@MainActivity, "dock_x", fabX.roundToInt())
+                    Prefs.putRaw(this@MainActivity, "dock_y", fabY.roundToInt())
+                    Prefs.putRaw(this@MainActivity, "dock_set", 1)
                 } else {
                     musicFab.performClick()
                 }
@@ -470,6 +494,13 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         MapLibre.getInstance(this)
+
+        // Posição salva do botão ♪ (se o usuário já arrastou)
+        if (Prefs.getInt(this, "dock_set") == 1) {
+            fabX = Prefs.getInt(this, "dock_x").toFloat()
+            fabY = Prefs.getInt(this, "dock_y").toFloat()
+        }
+
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 val r = tts?.setLanguage(Locale("pt", "BR"))
@@ -570,7 +601,11 @@ class MainActivity : Activity() {
         cLabel = Prefs.colorOf(this, "label_c", GRAY)
         cClock = Prefs.colorOf(this, "clock_c", BLUE_LIGHT)
         cStat = Prefs.colorOf(this, "stat_c", Color.WHITE)
-        cArc = Prefs.colorOf(this, "arc_color", accent)
+        cArc1 = Prefs.arcZoneColor(this, 1, accent)
+        cArc2 = Prefs.arcZoneColor(this, 2, accent)
+        cArc3 = Prefs.arcZoneColor(this, 3, accent)
+        arcLim1 = Prefs.intOr(this, "arc_lim1", 80)
+        arcLim2 = Prefs.intOr(this, "arc_lim2", 120)
         cNum = Prefs.colorOf(this, "num_color", Color.WHITE)
         cUnit = Prefs.colorOf(this, "unit_color", cLabel)
         cCard = withAlpha(Prefs.colorOf(this, "card_c", 0xFF0C1B33.toInt()), 0xCC)
@@ -595,31 +630,69 @@ class MainActivity : Activity() {
         return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(pair.first, pair.second))
     }
 
-    // ---------- Player flutuante (bloco arrastável) ----------
+    // ---------- Player flutuante (o botão decide para onde o player abre) ----------
 
-    // Mantém o bloco dentro da tela
-    private fun clampDock(x: Float, y: Float): Pair<Float, Float> {
-        val parent = musicDock.parent as? View ?: return Pair(x, y)
-        val m = px(16).toFloat()
-        val minX = -(parent.width - m - musicDock.width)
-        val minY = -(parent.height - m - musicDock.height)
-        val cx = x.coerceIn(minOf(minX, m), m)
-        val cy = y.coerceIn(minOf(minY, m), m)
-        return Pair(cx, cy)
-    }
+    // Posiciona o botão ♪ e o player conforme o lado da tela em que o botão está
+    private fun applyFabLayout() {
+        val parent = musicDock.parent as? View ?: return
+        val pw = parent.width
+        val ph = parent.height
+        if (pw == 0 || ph == 0) return
 
-    private fun applyDockPos(x: Float, y: Float) {
-        val (cx, cy) = clampDock(x, y)
-        musicDock.translationX = cx
-        musicDock.translationY = cy
+        val s = px(56)
+        val gap = px(8)
+        val popupW = px(280)
+
+        // Primeira vez: canto inferior direito
+        if (fabX < 0f) {
+            fabX = (pw - s - px(16)).toFloat()
+            fabY = (ph - s - px(16)).toFloat()
+        }
+        fabX = fabX.coerceIn(0f, (pw - s).toFloat())
+        fabY = fabY.coerceIn(0f, (ph - s).toFloat())
+
+        // Lado: direita ou esquerda; metade: embaixo ou em cima
+        val onRight = fabX + s / 2f > pw / 2f
+        val onBottom = fabY + s / 2f > ph / 2f
+        val align = if (onRight) Gravity.END else Gravity.START
+
+        // Ordem dos filhos: se o botão está embaixo, o player vai acima dele; senão, abaixo
+        val popupLp = LinearLayout.LayoutParams(popupW, WRAP).apply {
+            gravity = align
+            if (onBottom) bottomMargin = gap else topMargin = gap
+        }
+        val fabLp = LinearLayout.LayoutParams(s, s).apply { gravity = align }
+        val first: View = if (onBottom) musicPopup else musicFab
+        val second: View = if (onBottom) musicFab else musicPopup
+        if (musicDock.childCount != 2 || musicDock.getChildAt(0) != first) {
+            musicDock.removeAllViews()
+            musicDock.addView(first, if (onBottom) popupLp else fabLp)
+            musicDock.addView(second, if (onBottom) fabLp else popupLp)
+        } else {
+            musicDock.updateViewLayout(first, if (onBottom) popupLp else fabLp)
+            musicDock.updateViewLayout(second, if (onBottom) fabLp else popupLp)
+        }
+        musicDock.gravity = align
+
+        // Tamanho atual do bloco (player aberto ou só o botão)
+        val open = musicOpen
+        val popupH = if (musicPopup.height > 0) musicPopup.height else px(200)
+        val dw = if (open) popupW else s
+        val dh = if (open) popupH + gap + s else s
+
+        var dx = if (onRight) fabX + s - dw else fabX
+        var dy = if (onBottom) fabY + s - dh else fabY
+        dx = dx.coerceIn(0f, maxOf(0f, (pw - dw).toFloat()))
+        dy = dy.coerceIn(0f, maxOf(0f, (ph - dh).toFloat()))
+        musicDock.translationX = dx
+        musicDock.translationY = dy
     }
 
     private fun toggleMusic() {
         musicOpen = !musicOpen
         musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
         musicFab.text = if (musicOpen) "✕" else "♪"
-        // Ao abrir, o painel cresce para cima: reajusta para não sair da tela
-        musicDock.post { applyDockPos(musicDock.translationX, musicDock.translationY) }
+        musicDock.post { applyFabLayout() }
     }
 
     // ---------- Estilo do mapa (claro, escuro ou automático) ----------
@@ -662,7 +735,6 @@ class MainActivity : Activity() {
 
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
-        // Ícone da sua posição, escolhido nas Configurações
         s.addImage("me-icon", styledMarker(Prefs.getInt(this, "marker"), accent))
 
         val rs = GeoJsonSource("route-src")
@@ -1300,21 +1372,9 @@ class MainActivity : Activity() {
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        // Player: bloco arrastável no canto (painel em cima, botão embaixo)
-        frame.addView(
-            musicDock,
-            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.END or Gravity.BOTTOM).apply {
-                setMargins(0, 0, px(16), px(16))
-            }
-        )
-
-        // Restaura a posição salva do player
-        musicDock.post {
-            applyDockPos(
-                Prefs.getInt(this, "fab_x").toFloat(),
-                Prefs.getInt(this, "fab_y").toFloat()
-            )
-        }
+        // Player: bloco que fica no lugar do botão ♪ (ele mesmo calcula a posição)
+        frame.addView(musicDock, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START))
+        musicDock.post { applyFabLayout() }
 
         setScreen(showMap)
         return frame
@@ -1352,7 +1412,7 @@ class MainActivity : Activity() {
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap(false)
         minimap.alpha = 0.35f
-        arcView = SpeedArcView(this).apply { arcColor = cArc }
+        arcView = SpeedArcView(this).apply { setZones(cArc1, cArc2, cArc3, arcLim1, arcLim2) }
         arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1
         speedView = label(
@@ -1472,6 +1532,10 @@ class MainActivity : Activity() {
             addView(card, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(controls, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(8) })
         }
+        // Quando o player muda de tamanho, recalcula a posição para não sair da tela
+        musicPopup.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            musicDock.post { applyFabLayout() }
+        }
 
         // Botão flutuante ♪ / ✕
         musicFab = Button(this).apply {
@@ -1488,22 +1552,13 @@ class MainActivity : Activity() {
             setOnTouchListener(fabTouch)
         }
 
-        // Bloco do player: painel em cima e botão embaixo, sempre alinhados à direita
+        // Bloco do player: botão e painel. A ordem e o alinhamento são definidos em applyFabLayout
         musicDock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
         }
-        musicDock.addView(
-            musicPopup,
-            LinearLayout.LayoutParams(px(280), WRAP).apply {
-                gravity = Gravity.END
-                bottomMargin = px(8)
-            }
-        )
-        musicDock.addView(
-            musicFab,
-            LinearLayout.LayoutParams(px(56), px(56)).apply { gravity = Gravity.END }
-        )
+        musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP))
+        musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
 
         // Botões pequenos: mapa, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("🗺")
