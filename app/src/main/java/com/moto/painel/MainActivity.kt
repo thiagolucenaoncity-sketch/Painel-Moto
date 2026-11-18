@@ -1918,10 +1918,13 @@ class MainActivity : Activity() {
         d.setTint(color)
         d.setBounds(0, 0, px(size), px(size))
         if (text.isNullOrBlank()) {
-            // Ícone sozinho: drawable superior centralizado pelo próprio Button.
-            setCompoundDrawables(null, d, null, null)
-            compoundDrawablePadding = 0
+            // Drawable no foreground: centralizado na área inteira do botão,
+            // sem depender da altura da linha de texto (que deslocava o ícone).
+            setCompoundDrawables(null, null, null, null)
+            text = ""
             setPadding(0, 0, 0, 0)
+            foregroundGravity = Gravity.CENTER
+            foreground = d
         } else {
             // Botões com legenda (Salvar/Zerar) mantêm ícone ao lado do texto.
             setCompoundDrawables(d, null, null, null)
