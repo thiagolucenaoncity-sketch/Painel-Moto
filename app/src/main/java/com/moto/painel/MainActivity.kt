@@ -2104,11 +2104,17 @@ class MainActivity : Activity() {
         saveBtn.setOnClickListener { saveTrip() }
         val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f).apply { panelIcon(R.drawable.ravo_panel_reset, cLabel, 16) }
         resetBtn.setOnClickListener { resetTrip() }
+        // Impede quebra de texto e distribui o espaço entre os botões em telas estreitas.
+        listOf(tripBtn, saveBtn, resetBtn).forEach {
+            it.isSingleLine = true
+            it.ellipsize = android.text.TextUtils.TruncateAt.END
+            it.includeFontPadding = false
+        }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 2f).apply { setMargins(px(4), 0, px(4), 0) })
-        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(44), px(44)).apply { setMargins(0, 0, px(4), 0) })
-        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
-        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(0, 0, px(4), 0) })
+        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
+        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(36), px(44)).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1.25f).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1.15f).apply { setMargins(0, 0, px(2), 0) })
 
         // Player: capa, título e artista (fica dentro do painel flutuante)
         val card = LinearLayout(this).apply {
