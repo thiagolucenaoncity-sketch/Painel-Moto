@@ -46,7 +46,7 @@ class SplashActivity : Activity() {
         } else {
             val size = (220 * resources.displayMetrics.density).toInt()
             val logo = ImageView(this).apply {
-                setImageResource(R.drawable.ravo_icon)
+                setImageResource(R.mipmap.ravo_icon)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
             frame.addView(logo, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
