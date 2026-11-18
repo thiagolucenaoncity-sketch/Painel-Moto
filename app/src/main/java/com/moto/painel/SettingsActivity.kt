@@ -151,10 +151,10 @@ class SettingsActivity : Activity() {
 
     private fun addAbertura(col: LinearLayout) {
         add(col, section("TELA DE ABERTURA"), 0)
-        add(col, cycler("Tela de abertura", arrayOf("Logo Ravo", "Minhas fotos", "Desligada"), "splash_mode"))
+        add(col, cycler("Tela de abertura", arrayOf("Abertura RAVO", "RAVO + Minha Moto", "Desligada"), "splash_mode"))
         add(col, pickButton("Foto para celular em pé", reqPortrait), 10)
         add(col, pickButton("Foto para celular deitado", reqLandscape), 10)
-        add(col, note("Escolha uma foto para cada posição do celular. O app mostra a certa conforme você girar."), 12)
+        add(col, note("Na opção RAVO + Minha Moto, a abertura oficial aparece primeiro e depois sua foto. Escolha uma foto para cada posição do celular."), 12)
     }
 
     private fun addUnidades(col: LinearLayout) {
