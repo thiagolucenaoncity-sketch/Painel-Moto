@@ -940,6 +940,9 @@ class MainActivity : Activity() {
         minHeight = 0
         minimumHeight = 0
         setPadding(0, 0, 0, 0)
+        gravity = Gravity.CENTER
+        textAlignment = View.TEXT_ALIGNMENT_CENTER
+        includeFontPadding = false
         setOnClickListener { onClick() }
     }
 
