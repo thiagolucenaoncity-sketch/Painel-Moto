@@ -7,7 +7,7 @@
     <application
         android:name=".RavoApp"
         android:label="Ravo"
-        android:icon="@mipmap/ravo_icon"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
         <activity
