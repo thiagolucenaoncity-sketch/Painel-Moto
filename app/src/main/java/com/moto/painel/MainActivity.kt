@@ -2592,7 +2592,7 @@ class MainActivity : Activity() {
             addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)))
         }
         val attrib = label(9f, cLabel, align = Gravity.CENTER).apply {
-            text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM"
+            text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM · Alertas: Pardal (ODbL)"
         }
         val bottomCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
