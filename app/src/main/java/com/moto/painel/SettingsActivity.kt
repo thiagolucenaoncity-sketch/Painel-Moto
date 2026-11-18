@@ -145,6 +145,11 @@ class SettingsActivity : Activity() {
         add(col, section("3D"), 0)
         add(col, cycler("Prédios 3D", arrayOf("Desligados", "Ligados"), "buildings"))
         add(col, note("Os prédios só aparecem quando o modo 3D estiver ativado no mapa."), 12)
+        add(col, section("ALERTAS DE TRÂNSITO"), 16)
+        add(col, cycler("Radares fixos", arrayOf("Ligados", "Desligados"), "alert_radar"))
+        add(col, cycler("Lombadas", arrayOf("Ligadas", "Desligadas"), "alert_bump"))
+        add(col, cycler("Bipes de aproximação", arrayOf("Ligados", "Desligados"), "alert_beep"))
+        add(col, note("Aviso por voz a cerca de 350 m e bipes progressivos abaixo de 150 m. Usa registros colaborativos do OpenStreetMap; pode haver pontos ausentes ou desatualizados. Requer internet e GPS."), 12)
     }
 
     private fun addAbertura(col: LinearLayout) {
