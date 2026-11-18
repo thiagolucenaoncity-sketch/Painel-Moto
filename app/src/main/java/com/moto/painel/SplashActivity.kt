@@ -93,10 +93,14 @@ class SplashActivity : Activity() {
         }
         spinnerArea.addView(ring, FrameLayout.LayoutParams(-1, -1))
         val bike = ImageView(this).apply {
-            setImageResource(R.drawable.ravo_splash_motorcycle)
             scaleType = ImageView.ScaleType.FIT_CENTER
+            val bitmap = try {
+                assets.open("ravo_moto_loading.png").use { BitmapFactory.decodeStream(it) }
+            } catch (_: Exception) { null }
+            if (bitmap != null) setImageBitmap(bitmap)
+            else setImageResource(R.drawable.ravo_splash_motorcycle)
         }
-        spinnerArea.addView(bike, FrameLayout.LayoutParams(dp(59), dp(59), Gravity.CENTER))
+        spinnerArea.addView(bike, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER))
         val label = TextView(this).apply {
             text = "Carregando"
             textSize = 15f
