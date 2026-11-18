@@ -18,6 +18,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.MediaMetadata
@@ -267,6 +269,33 @@ class EqualizerView(ctx: Context) : View(ctx) {
 class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private var isConnected: Boolean? = null
+    private var offlineNotice: TextView? = null
+    private fun online(): Boolean {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = manager.activeNetwork ?: return false
+        return manager.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+    }
+    private fun updateConnection() {
+        val now = online()
+        if (now == isConnected) return
+        val previously = isConnected
+        isConnected = now
+        offlineNotice?.apply {
+            visibility = if (now) View.GONE else View.VISIBLE
+            text = "SEM INTERNET · mapa salvo / cache"
+        }
+        if (!now) {
+            if (previously == true) toast("Sem internet: GPS e mapas salvos continuam disponíveis")
+        } else if (previously == false) {
+            toast("Conexão restabelecida. Mapa online novamente.")
+            // Recarrega somente estilos que nao haviam sido carregados.
+            holders.forEach { h ->
+                if (h.style == null) h.map?.setStyle(Style.Builder().fromUri(MAP_URL)) { style -> onStyleReady(h, style) }
+            }
+            lastFix?.let { roadAlerts.fetchAt(it.latitude, it.longitude) }
+        }
+    }
     private var controller: MediaController? = null
 
     // Cores (carregadas das Configurações)
@@ -427,6 +456,7 @@ class MainActivity : Activity() {
             updateBattery()
             updateTime()
             updateTripButtons()
+            updateConnection()
             handler.postDelayed(this, 1000)
         }
     }
@@ -596,6 +626,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideStatusBar()
         MapLibre.getInstance(this)
+        OfflineMaps.configure(this)
 
         // Posição salva do botão ♪ (se o usuário já arrastou)
         if (Prefs.getInt(this, "dock_set") == 1) {
@@ -666,6 +697,7 @@ class MainActivity : Activity() {
             updateMedia()
         }
         holders.forEach { it.view.onResume() }
+        updateConnection()
         handler.post(tick)
         handler.post(pollSessions)
         handler.post(eqTick)
@@ -2402,6 +2434,15 @@ class MainActivity : Activity() {
         // Mapa ocupa 100% da área
         fullMap = newMap(true)
         frame.addView(fullMap, FrameLayout.LayoutParams(MATCH, MATCH))
+        offlineNotice = label(12f, Color.WHITE, bold = true).apply {
+            text = "SEM INTERNET · mapa salvo / cache"
+            setPadding(px(12), px(8), px(12), px(8))
+            background = box(context, 0xDDAD391B.toInt(), 10)
+            visibility = if (isConnected == false) View.VISIBLE else View.GONE
+        }
+        frame.addView(offlineNotice, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = px(104)
+        })
 
         // ----- Topo: pesquisa minimalista, favoritos e cartão de instrução -----
         val searchBox = LinearLayout(this).apply {
@@ -2510,6 +2551,16 @@ class MainActivity : Activity() {
             panelIcon(R.drawable.ravo_panel_orientation)
             contentDescription = "Orientação: " + orientLabel()
         }
+        val offlineSaveBtn = floatBtn("↓") {
+            if (!online()) {
+                toast("Conecte à internet para salvar uma área offline")
+            } else {
+                val target = holders.firstOrNull { it.interactive }?.map?.cameraPosition?.target
+                if (target != null) {
+                    OfflineMaps.saveNearby(this, target) { message -> toast(message) }
+                } else toast("Mapa ainda não está pronto")
+            }
+        }.apply { contentDescription = "Salvar esta área para usar sem internet" }
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -2517,6 +2568,7 @@ class MainActivity : Activity() {
             addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
             addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
         }
         frame.addView(
             rightCol,
