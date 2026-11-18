@@ -8,7 +8,7 @@ object Prefs {
 
     val BG_NAMES = arrayOf("Grade azul", "Preto", "Azul degradê", "Roxo degradê")
     val GAUGE_NAMES = arrayOf("Arco", "Digital")
-    val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino")
+    val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino", "Esportiva", "Street", "Trail", "Scooter", "Custom", "Entrega")
     val UNIT_NAMES = arrayOf("km/h e km", "mph e milhas")
 
     // Paleta usada por todas as opções de cor. Índice 0 = "Padrão"
