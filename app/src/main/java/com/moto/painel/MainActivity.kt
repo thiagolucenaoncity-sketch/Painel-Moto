@@ -1049,8 +1049,22 @@ class MainActivity : Activity() {
                             "road", "highway", "transport", "bridge", "tunnel", "motorway",
                             "primary", "secondary", "tertiary", "trunk", "minor", "street"
                         ).any { id.contains(it) }
-                        val c = if (isRoad) 0xFF7CC4FF.toInt() else 0xFF2A4A70.toInt()
-                        layer.setProperties(PropertyFactory.lineColor(hex(c)))
+                        // Hierarquia visual: vias locais discretas, avenidas mais claras,
+                        // expressas em destaque. Não sobrescreve o contorno das ruas.
+                        if (isRoad) {
+                            val isOutline = listOf("casing", "outline", "border").any { id.contains(it) }
+                            val roadColor = when {
+                                id.contains("motorway") || id.contains("trunk") || id.contains("express") -> 0xFFFFC66D.toInt()
+                                id.contains("primary") -> 0xFFFFD99B.toInt()
+                                id.contains("secondary") || id.contains("tertiary") -> 0xFFB5D1E5.toInt()
+                                else -> 0xFF718FA9.toInt()
+                            }
+                            layer.setProperties(PropertyFactory.lineColor(hex(
+                                if (isOutline) 0xFF253D57.toInt() else roadColor
+                            )))
+                        } else if (!id.contains("route")) {
+                            layer.setProperties(PropertyFactory.lineColor(hex(0xFF2A4A70.toInt())))
+                        }
                     }
                     is SymbolLayer -> layer.setProperties(
                         PropertyFactory.textColor(hex(0xFFD6E6FF.toInt())),
@@ -1127,10 +1141,22 @@ class MainActivity : Activity() {
         }
         applyBuildingVisibility(s)
 
+        // Rota laranja de alto contraste, com contorno escuro para destacar
+        // o caminho tanto no mapa claro quanto no mapa noturno.
+        s.addLayer(
+            LineLayer("route-outline-layer", "route-src").withProperties(
+                PropertyFactory.lineColor(0xFF152236.toInt()),
+                PropertyFactory.lineWidth(13f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+            )
+        )
         s.addLayer(
             LineLayer("route-layer", "route-src").withProperties(
-                PropertyFactory.lineColor(accent),
-                PropertyFactory.lineWidth(8f)
+                PropertyFactory.lineColor(0xFFFF7139.toInt()),
+                PropertyFactory.lineWidth(8f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
         )
         s.addLayer(
