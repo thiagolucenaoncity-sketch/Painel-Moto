@@ -42,6 +42,24 @@ class RoadAlerts(
     private var activeRoute: List<LatLng> = emptyList()
     private var userPosition: Location? = null
     private var priorities: Map<String, String> = emptyMap()
+    private val trafficSignalsLazy = lazy {
+        TrafficSignalSource(context) { refreshTrafficSignals() }
+    }
+    private val trafficSignals: TrafficSignalSource get() = trafficSignalsLazy.value
+    private val lazyTrafficReady: Boolean get() = trafficSignalsLazy.isInitialized()
+
+    private fun signalHazards(lat: Double, lon: Double): List<Hazard> =
+        trafficSignals.nearby(lat, lon).map { s ->
+            Hazard(s.id, s.lat, s.lon, "semaforo", "")
+        }
+
+    private fun refreshTrafficSignals() {
+        val c = center ?: return
+        hazards = hazards.filter { it.type != "semaforo" } + signalHazards(c.latitude, c.longitude)
+        priorities = emptyMap()
+        updatePriorities()
+        redraw()
+    }
 
     // Projeção local em metros: distância lateral e progresso sobre a rota.
     private fun project(lat: Double, lon: Double, path: List<LatLng>): Pair<Double, Double>? {
@@ -80,7 +98,7 @@ class RoadAlerts(
         val path = activeRoute
         val me = userPosition
         val currentProgress = if (me != null && path.size > 1) project(me.latitude, me.longitude, path)?.second else null
-        val next = if (currentProgress != null) hazards.filter { enabled(it) }.mapNotNull { h ->
+        val next = if (currentProgress != null) hazards.filter { enabled(it) && it.type != "semaforo" }.mapNotNull { h ->
             val match = project(h.lat, h.lon, path) ?: return@mapNotNull null
             // Somente pontos próximos ao traçado e à frente, evitando retorno pela mesma via.
             if (match.first > 28.0 || match.second < currentProgress + 8.0) null
@@ -100,7 +118,12 @@ class RoadAlerts(
         }
     }
 
-    fun stop() { active = false; tone.release(); handler.removeCallbacksAndMessages(null) }
+    fun stop() {
+        active = false
+        if (lazyTrafficReady) trafficSignals.close()
+        tone.release()
+        handler.removeCallbacksAndMessages(null)
+    }
 
     // O mapa pode ser explorado longe do GPS: consulta também a área aberta na tela.
     fun fetchAt(lat: Double, lon: Double) {
@@ -119,7 +142,11 @@ class RoadAlerts(
             addStringProperty("priority", priorities[it.id] ?: "other")
         }
     })
-    private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, if (h.type == "radar") "alert_radar" else "alert_bump") == 0
+    private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, when (h.type) {
+        "radar" -> "alert_radar"
+        "semaforo" -> "alert_semaforo"
+        else -> "alert_bump"
+    }) == 0
 
     fun onLocation(loc: Location) {
         if (!active) return
@@ -132,7 +159,7 @@ class RoadAlerts(
         val prev = previous
         previous = Location(loc)
         if (loc.hasSpeed() && loc.speed < 1.5f) return
-        val candidates = hazards.filter { enabled(it) }.map { h ->
+        val candidates = hazards.filter { enabled(it) && it.type != "semaforo" }.map { h ->
             val p = Location("osm").apply { latitude = h.lat; longitude = h.lon }
             h to loc.distanceTo(p).toDouble()
         }.filter { (h, d) ->
@@ -219,13 +246,14 @@ class RoadAlerts(
                 }
                 handler.post {
                     if (!active) return@post
-                    hazards = near
+                    hazards = near + signalHazards(lat, lon)
                     center = Location(loc)
                     lastFailure = false
                     warned.clear()
                     priorities = emptyMap()
                     updatePriorities()
                     redraw()
+                    if (Prefs.getInt(context, "alert_semaforo") == 0) trafficSignals.fetchAt(lat, lon)
                     if (near.isEmpty()) {
                         onStatus("Sem pontos cadastrados nesta região da base offline de SP")
                     }
