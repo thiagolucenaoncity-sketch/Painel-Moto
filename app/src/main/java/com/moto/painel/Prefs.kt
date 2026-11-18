@@ -38,7 +38,8 @@ object Prefs {
     // Todas as chaves de cor (usadas para restaurar o padrão)
     val COLOR_KEYS = arrayOf(
         "accent_c", "bg_c", "grid_c", "card_c", "clock_c",
-        "label_c", "arc_c1", "arc_c2", "arc_c3", "num_color", "unit_color", "stat_c"
+        "label_c", "arc_c1", "arc_c2", "arc_c3", "arc_track",
+        "num_color", "unit_color", "stat_c"
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -59,7 +60,7 @@ object Prefs {
 
     fun accentColor(ctx: Context): Int = colorOf(ctx, "accent_c", 0xFF2EA8FF.toInt())
 
-    // Cor de cada faixa do arco: 1 = azul (destaque), 2 = amarelo, 3 = vermelho, quando "Padrão"
+    // Cor de cada faixa do arco: 1 = destaque, 2 = amarelo, 3 = vermelho, quando "Padrão"
     fun arcZoneColor(ctx: Context, zone: Int, accent: Int): Int {
         val idx = getInt(ctx, "arc_c$zone").coerceIn(0, COLOR_VALUES.size - 1)
         if (idx != 0) return COLOR_VALUES[idx]
