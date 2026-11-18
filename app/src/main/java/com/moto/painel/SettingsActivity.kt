@@ -149,7 +149,7 @@ class SettingsActivity : Activity() {
         add(col, cycler("Radares fixos", arrayOf("Ligados", "Desligados"), "alert_radar"))
         add(col, cycler("Lombadas", arrayOf("Ligadas", "Desligadas"), "alert_bump"))
         add(col, cycler("Bipes de aproximação", arrayOf("Ligados", "Desligados"), "alert_beep"))
-        add(col, note("Aviso por voz a cerca de 350 m e bipes progressivos abaixo de 150 m. Usa registros colaborativos do OpenStreetMap; pode haver pontos ausentes ou desatualizados. Requer internet e GPS."), 12)
+        add(col, note("Radares e lombadas de São Paulo já incluídos no app (base Pardal / dados abertos e OpenStreetMap, ODbL). Funcionam sem internet. Aviso por voz por volta de 350 m e bipes progressivos abaixo de 150 m; depende do GPS. Dados podem estar incompletos ou desatualizados."), 12)
     }
 
     private fun addAbertura(col: LinearLayout) {
