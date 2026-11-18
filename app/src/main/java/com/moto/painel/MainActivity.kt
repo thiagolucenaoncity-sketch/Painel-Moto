@@ -16,6 +16,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -297,9 +298,8 @@ class MainActivity : Activity() {
 
     // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro (azul noite)
     private var mapMode = 0
-    private val styleBtns = ArrayList<Button>()
 
-    // Mapa 3D (inclinado) ou 2D (visão de cima)
+    // Inclinação 3D do mapa (independente da opção de prédios)
     private var is3D = false
     private val modeBtns = ArrayList<Button>()
 
@@ -352,16 +352,22 @@ class MainActivity : Activity() {
     private lateinit var eqView: EqualizerView
     private lateinit var playBtn: Button
 
-    // Mapa completo
-    private lateinit var mapScreen: LinearLayout
+    // Mapa completo (tela cheia, com controles flutuantes por cima)
+    private lateinit var mapScreen: FrameLayout
     private lateinit var fullMap: MapView
     private lateinit var searchInput: EditText
     private lateinit var suggestScroll: ScrollView
     private lateinit var suggestBox: LinearLayout
+    private lateinit var favRowView: LinearLayout
     private lateinit var favChips: LinearLayout
+    private lateinit var addFavBtn: Button
+    private lateinit var instrCard: LinearLayout
     private lateinit var mapInstructionView: TextView
     private lateinit var mapInfoView: TextView
     private lateinit var voiceBtn: Button
+    private lateinit var mapStyleBtn: Button
+    private lateinit var mapTiltBtn: Button
+    private lateinit var cancelBtn: Button
 
     // Trips salvas
     private lateinit var tripsScreen: LinearLayout
@@ -541,7 +547,6 @@ class MainActivity : Activity() {
         var meSrc: GeoJsonSource? = null
         var routeSrc: GeoJsonSource? = null
         var destSrc: GeoJsonSource? = null
-        var buildings: FillExtrusionLayer? = null
 
         init {
             view.onCreate(null)
@@ -909,6 +914,37 @@ class MainActivity : Activity() {
         return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(pair.first, pair.second))
     }
 
+    // ---------- Botões flutuantes do mapa (estilo azul-marinho semitransparente) ----------
+
+    // Fundo normal (azul-marinho semitransparente) e efeito ao pressionar
+    private fun floatBg(): StateListDrawable = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), box(this@MainActivity, 0xEE1D3A66.toInt(), 14, 0x806FA8E8.toInt()))
+        addState(intArrayOf(), box(this@MainActivity, 0xCC0B1A33.toInt(), 14, 0x553A6FB0))
+    }
+
+    // Botão flutuante só com ícone
+    private fun floatBtn(icon: String, onClick: () -> Unit): Button = Button(this).apply {
+        text = icon
+        textSize = 18f
+        setTextColor(Color.WHITE)
+        isAllCaps = false
+        stateListAnimator = null
+        background = floatBg()
+        minWidth = 0
+        minimumWidth = 0
+        minHeight = 0
+        minimumHeight = 0
+        setPadding(0, 0, 0, 0)
+        setOnClickListener { onClick() }
+    }
+
+    // Ativado: fundo na cor de destaque (azul elétrico por padrão). Desativado: fica mais apagado
+    private fun setOn(b: Button, on: Boolean, enabled: Boolean = true) {
+        b.background = if (on) box(this, accent, 14) else floatBg()
+        b.setTextColor(Color.WHITE)
+        b.alpha = if (enabled) 1f else 0.4f
+    }
+
     // ---------- Player flutuante (o botão decide para onde o player abre) ----------
 
     // Posiciona o botão ♪ e o player conforme o lado da tela em que o botão está
@@ -983,12 +1019,6 @@ class MainActivity : Activity() {
             Configuration.UI_MODE_NIGHT_YES
     }
 
-    private fun styleLabel(): String = when (mapMode) {
-        1 -> "☀"
-        2 -> "☾"
-        else -> "A"
-    }
-
     // Troca o estilo de todos os mapas e refaz as camadas (rota, posição, prédios)
     private fun applyMapStyle() {
         holders.forEach { h ->
@@ -1033,9 +1063,22 @@ class MainActivity : Activity() {
         }
     }
 
-    // Prédios aparecem só se o 3D estiver ativo e a opção "Prédios 3D" estiver ligada nas Configurações
-    private fun buildingsOn(): Boolean =
-        is3D && Prefs.getInt(this, "buildings") == 1
+    // Prédios: o volume 3D depende só da opção "Prédios 3D" nas Configurações (não do botão de inclinação)
+    private fun buildingsEnabled(): Boolean = Prefs.getInt(this, "buildings") == 1
+
+    // Liga ou desliga o volume de TODAS as camadas de prédios do estilo (as que já vêm no mapa e a nossa)
+    private fun applyBuildingVisibility(s: Style) {
+        val vis = if (buildingsEnabled()) Property.VISIBLE else Property.NONE
+        for (layer in s.layers) {
+            if (layer is FillExtrusionLayer) {
+                try {
+                    layer.setProperties(PropertyFactory.visibility(vis))
+                } catch (e: Exception) {
+                    // Camada que não aceita a mudança continua como está
+                }
+            }
+        }
+    }
 
     // ---------- Mapa: criação, estilo e camadas ----------
 
@@ -1060,7 +1103,7 @@ class MainActivity : Activity() {
         s.addSource(ds)
         s.addSource(ms)
 
-        // Prédios em 3D: usa a fonte de dados vetoriais do estilo atual
+        // Prédios em 3D: usa a fonte de dados vetoriais do estilo atual (se o estilo não tiver, segue em 2D)
         val vec = s.sources.firstOrNull { it is VectorSource } as? VectorSource
         if (vec != null) {
             try {
@@ -1075,15 +1118,14 @@ class MainActivity : Activity() {
                             Expression.get(if (isProto) "min_height" else "render_min_height")
                         ),
                         PropertyFactory.fillExtrusionColor(0xFF2A3F63.toInt()),
-                        PropertyFactory.fillExtrusionOpacity(0.9f),
-                        PropertyFactory.visibility(if (buildingsOn()) Property.VISIBLE else Property.NONE)
+                        PropertyFactory.fillExtrusionOpacity(0.9f)
                     )
                 s.addLayer(b)
-                h.buildings = b
             } catch (e: Exception) {
-                // Se o estilo não tiver a camada de prédios, o mapa continua em 2D
+                // Se o estilo não tiver a camada de prédios, o mapa continua sem ela
             }
         }
+        applyBuildingVisibility(s)
 
         s.addLayer(
             LineLayer("route-layer", "route-src").withProperties(
@@ -1170,11 +1212,10 @@ class MainActivity : Activity() {
         }
     }
 
-    // Alterna entre visão 2D (de cima) e 3D (inclinada)
+    // Inclina ou volta o mapa (independente da opção de prédios)
     private fun toggle3D() {
         is3D = !is3D
         holders.forEach { h ->
-            h.buildings?.setProperties(PropertyFactory.visibility(if (buildingsOn()) Property.VISIBLE else Property.NONE))
             val m = h.map
             if (m != null) {
                 if (followMe) {
@@ -1189,6 +1230,7 @@ class MainActivity : Activity() {
             }
         }
         modeBtns.forEach { it.text = modeLabel() }
+        refreshMapButtons()
     }
 
     private fun modeLabel(): String = if (is3D) "2D" else "3D"
@@ -1262,7 +1304,7 @@ class MainActivity : Activity() {
             suggestBox.addView(
                 TextView(this).apply {
                     text = sg.name
-                    textSize = 15f
+                    textSize = 14f
                     setTextColor(Color.WHITE)
                     setPadding(px(12), px(10), px(12), px(10))
                     setOnClickListener {
@@ -1390,6 +1432,13 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(WRAP, px(40)).apply { setMargins(px(4), 0, px(4), 0) }
             )
         }
+    }
+
+    // Mostra ou esconde a faixa de favoritos (ativada pelo ★ da busca)
+    private fun toggleFavRow() {
+        if (!::favRowView.isInitialized) return
+        favRowView.visibility = if (favRowView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        refreshFavChips()
     }
 
     // Salva o destino atual como favorito, com um apelido escolhido por você
@@ -1557,6 +1606,7 @@ class MainActivity : Activity() {
         navView.text = "➜ $main"
         navView.visibility = if (main.isEmpty()) View.GONE else View.VISIBLE
         navView.isSelected = true
+        refreshMapButtons()
     }
 
     // Busca a rota (usada na primeira vez e também no recálculo)
@@ -1648,6 +1698,7 @@ class MainActivity : Activity() {
             showInstruction(first.text, "Total ${fmtDist(totalM)} · cerca de ${(durS / 60).roundToInt()} min")
             say(if (isRecalc) "Rota recalculada. ${first.text}" else first.text)
         }
+        refreshMapButtons()
     }
 
     private fun clearRoute() {
@@ -1657,10 +1708,31 @@ class MainActivity : Activity() {
         stepIndex = 0
         offCount = 0
         holders.forEach { refreshRoute(it) }
-        mapInstructionView.text = "Digite um destino acima"
+        mapInstructionView.text = ""
         mapInfoView.text = ""
         navView.text = ""
         navView.visibility = View.GONE
+        refreshMapButtons()
+    }
+
+    // Tem rota ativa? Só então aparecem o cancelar rota, o cartão de instrução e o salvar favorito
+    private fun hasRoute(): Boolean = routeDest != null
+
+    // Atualiza o destaque e a visibilidade dos botões flutuantes do mapa
+    private fun refreshMapButtons() {
+        if (!::mapStyleBtn.isInitialized) return
+        voiceBtn.text = if (voiceOn) "♪" else "⊘"
+        setOn(voiceBtn, voiceOn)
+        mapStyleBtn.text = when (mapMode) {
+            1 -> "☀"
+            2 -> "☾"
+            else -> "◐"
+        }
+        setOn(mapStyleBtn, mapMode != 0)
+        setOn(mapTiltBtn, is3D)
+        cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
+        addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
+        instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
     }
 
     // Traduz a manobra do OSRM para uma frase em português
@@ -1835,7 +1907,6 @@ class MainActivity : Activity() {
         // Desfaz os mapas antigos antes de montar a tela de novo
         destroyHolders()
         modeBtns.clear()
-        styleBtns.clear()
 
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         loadColors()
@@ -1845,7 +1916,7 @@ class MainActivity : Activity() {
         if (bgStyle == 0) frame.addView(GridView(this, cGrid), FrameLayout.LayoutParams(MATCH, MATCH))
 
         panelScreen = buildPanel(landscape)
-        mapScreen = buildMapScreen(landscape)
+        mapScreen = buildMapScreen()
         tripsScreen = buildTripsScreen()
         frame.addView(panelScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         frame.addView(mapScreen, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -1857,6 +1928,7 @@ class MainActivity : Activity() {
 
         setScreen(screenMode)
         updateTripButtons()
+        refreshMapButtons()
         return frame
     }
 
@@ -2161,27 +2233,37 @@ class MainActivity : Activity() {
         return root
     }
 
-    // Tela do mapa: no retrato, tudo empilhado; na paisagem, o mapa ocupa a maior parte à esquerda
-    // e a busca, favoritos, instruções e botões ficam numa coluna rolável à direita
-    private fun buildMapScreen(landscape: Boolean): LinearLayout {
-        val root = LinearLayout(this).apply {
-            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-            setBackgroundColor(0xFF06142B.toInt())
-        }
+    // Tela do mapa em tela cheia: o mapa ocupa tudo e os controles ficam flutuando por cima
+    private fun buildMapScreen(): FrameLayout {
+        val frame = FrameLayout(this).apply { setBackgroundColor(0xFF06142B.toInt()) }
 
-        // Campo de busca ocupa a largura toda, com o botão Ir ao lado
-        val searchRow = LinearLayout(this).apply {
+        // Mapa ocupa 100% da área
+        fullMap = newMap(true)
+        frame.addView(fullMap, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        // ----- Topo: pesquisa minimalista, favoritos e cartão de instrução -----
+        val searchBox = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(8), px(8), px(8), px(4))
+            background = floatBg()
+            setPadding(px(12), 0, px(4), 0)
         }
+        searchBox.addView(
+            TextView(this).apply {
+                text = "⌕"
+                textSize = 18f
+                setTextColor(cLabel)
+            },
+            LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = px(8) }
+        )
         searchInput = EditText(this).apply {
-            hint = "Para onde? ex: Av. Paulista, 1000"
+            hint = "Pesquisar"
             setHintTextColor(GRAY)
             setTextColor(Color.WHITE)
-            setBackgroundColor(BTN_BG)
-            setPadding(px(12), px(10), px(12), px(10))
+            textSize = 15f
+            background = null
             setSingleLine(true)
+            setPadding(0, px(10), 0, px(10))
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             addTextChangedListener(searchWatcher)
             setOnEditorActionListener { _, actionId, _ ->
@@ -2191,136 +2273,114 @@ class MainActivity : Activity() {
                 } else false
             }
         }
-        val goBtn = Button(this).apply {
-            text = "Ir"
-            setOnClickListener { go() }
-        }
-        searchRow.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
-        searchRow.addView(goBtn, LinearLayout.LayoutParams(px(64), WRAP).apply { setMargins(px(6), 0, 0, 0) })
+        searchBox.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
+        searchBox.addView(
+            floatBtn("★") { toggleFavRow() },
+            LinearLayout.LayoutParams(px(40), px(40))
+        )
 
-        // Lista de sugestões (aparece enquanto você digita); mais baixa na paisagem
+        // Sugestões (aparecem enquanto você digita)
         suggestBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cCard)
+            background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
         }
         suggestScroll = ScrollView(this).apply {
             visibility = View.GONE
-            setBackgroundColor(cCard)
             addView(suggestBox)
         }
 
-        // Favoritos: botões com apelido e botão ★ para salvar o destino atual
+        // Faixa de favoritos (abre pelo ★) e botão para salvar o destino atual
         favChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val favScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(favChips)
         }
-        val starBtn = miniBtn("★")
-        starBtn.setOnClickListener { askFavNick() }
-        val favRow = LinearLayout(this).apply {
+        addFavBtn = floatBtn("＋") { askFavNick() }
+        favRowView = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(px(8), 0, px(8), px(4))
-        }
-        favRow.addView(favScroll, LinearLayout.LayoutParams(0, WRAP, 1f))
-        favRow.addView(starBtn, LinearLayout.LayoutParams(px(44), px(40)))
-
-        val topCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(searchRow, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(suggestScroll, LinearLayout.LayoutParams(MATCH, px(if (landscape) 150 else 220)))
-            addView(favRow, LinearLayout.LayoutParams(MATCH, WRAP))
+            background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
+            setPadding(px(6), px(4), px(6), px(4))
+            visibility = View.GONE
+            addView(favScroll, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(addFavBtn, LinearLayout.LayoutParams(px(40), px(40)))
         }
 
-        // Cartão de manobra (instrução grande e distância restante)
-        mapInstructionView = label(20f, Color.WHITE, bold = true).apply {
-            text = "Digite um destino acima"
-            maxLines = 2
-        }
-        mapInfoView = label(14f, cClock)
-        val navCard = LinearLayout(this).apply {
+        // Cartão de instrução (só aparece com rota ativa)
+        mapInstructionView = label(18f, Color.WHITE, bold = true).apply { maxLines = 2 }
+        mapInfoView = label(13f, cClock)
+        instrCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cCard)
-            setPadding(px(16), px(10), px(16), px(10))
+            background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
+            setPadding(px(14), px(10), px(14), px(10))
+            visibility = View.GONE
             addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
-        // Mapa completo
-        fullMap = newMap(true)
+        val topCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(12), px(12), px(12), 0)
+            addView(searchBox, LinearLayout.LayoutParams(MATCH, px(48)))
+            addView(suggestScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
+            addView(favRowView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
+            addView(instrCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
+        }
+        frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
 
-        // Linha 1 embaixo do mapa: voz, cancelar rota e estilo (A / ☀ / ☾)
-        voiceBtn = Button(this).apply { text = if (voiceOn) "Voz: ligada" else "Voz: desligada" }
-        voiceBtn.setOnClickListener {
+        // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
+        voiceBtn = floatBtn("♪") {
             voiceOn = !voiceOn
-            voiceBtn.text = if (voiceOn) "Voz: ligada" else "Voz: desligada"
             if (!voiceOn) tts?.stop()
+            refreshMapButtons()
         }
-        val clearBtn = Button(this).apply {
-            text = "Cancelar rota"
-            setOnClickListener { clearRoute() }
-        }
-        val styleBtn = miniBtn(styleLabel())
-        styleBtns.add(styleBtn)
-        styleBtn.setOnClickListener {
+        mapStyleBtn = floatBtn("◐") {
             mapMode = (mapMode + 1) % 3
             Prefs.putRaw(this, "map_style", mapMode)
-            styleBtns.forEach { it.text = styleLabel() }
             applyMapStyle()
+            refreshMapButtons()
         }
-        val rowA = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        rowA.addView(voiceBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        rowA.addView(clearBtn, LinearLayout.LayoutParams(0, WRAP, 1f))
-        rowA.addView(styleBtn, LinearLayout.LayoutParams(px(48), px(44)))
-
-        // Linha 2 embaixo do mapa: 3D, centralizar (◎) e voltar ao painel
-        val mode3dBtn = miniBtn(modeLabel())
-        modeBtns.add(mode3dBtn)
-        mode3dBtn.setOnClickListener { toggle3D() }
-        val centerBtn = miniBtn("◎")
-        centerBtn.setOnClickListener { recenter() }
-        val backBtn = pill("Painel", BTN_BG, Color.WHITE, 14f)
-        backBtn.setOnClickListener { setScreen(0) }
-        val rowB = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        rowB.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        rowB.addView(centerBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(4), 0, px(4), 0) })
-        rowB.addView(backBtn, LinearLayout.LayoutParams(0, px(44), 1f).apply { setMargins(px(4), 0, px(4), 0) })
-
-        val attrib = label(10f, cLabel).apply { text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM" }
-
-        val bottomCard = LinearLayout(this).apply {
+        mapTiltBtn = floatBtn("◈") { toggle3D() }
+        val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cCard)
-            setPadding(px(12), px(8), px(12), px(8))
-            addView(rowA, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(rowB, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
-            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(4) })
+            gravity = Gravity.CENTER
+            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
         }
-
-        if (landscape) {
-            // Coluna da direita com rolagem: busca, favoritos, instrução e botões
-            val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            side.addView(topCol, LinearLayout.LayoutParams(MATCH, WRAP))
-            side.addView(navCard, LinearLayout.LayoutParams(MATCH, WRAP))
-            side.addView(bottomCard, LinearLayout.LayoutParams(MATCH, WRAP))
-            val sideScroll = ScrollView(this).apply {
-                isFillViewport = true
-                addView(side, LinearLayout.LayoutParams(MATCH, WRAP))
+        frame.addView(
+            rightCol,
+            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                rightMargin = px(12)
             }
-            // O mapa ocupa mais espaço que a coluna (2 partes contra 1)
-            root.addView(fullMap, LinearLayout.LayoutParams(0, MATCH, 2f))
-            root.addView(sideScroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(8) })
-        } else {
-            root.addView(topCol, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(navCard, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(fullMap, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            root.addView(bottomCard, LinearLayout.LayoutParams(MATCH, WRAP))
+        )
+
+        // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
+        val gpsBtn = floatBtn("◎") { recenter() }
+        cancelBtn = floatBtn("✕") { clearRoute() }
+        val backBtn = floatBtn("⌂") { setScreen(0) }
+        val controlsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(gpsBtn, LinearLayout.LayoutParams(px(50), px(50)))
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)))
         }
+        val attrib = label(9f, cLabel, align = Gravity.CENTER).apply {
+            text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM"
+        }
+        val bottomCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(12), 0, px(12), px(12))
+            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = px(4) })
+            addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        frame.addView(bottomCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
 
         refreshFavChips()
-        return root
+        refreshMapButtons()
+        return frame
     }
 }
