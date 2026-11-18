@@ -611,8 +611,9 @@ class MainActivity : Activity() {
                     m.addOnCameraIdleListener {
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
-                            val target = m.cameraPosition.target
-                            roadAlerts.fetchAt(target.latitude, target.longitude)
+                            m.cameraPosition.target?.let { target ->
+                                roadAlerts.fetchAt(target.latitude, target.longitude)
+                            }
                         }
                     }
                 }
