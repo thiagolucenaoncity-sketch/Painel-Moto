@@ -849,7 +849,7 @@ class MainActivity : Activity() {
             val t = list[i]
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = box(context, cCard, 14, cBorder)
+                background = box(context, cCard, 18, withAlpha(accent, 90))
                 setPadding(px(14), px(12), px(14), px(12))
             }
             card.addView(label(16f, Color.WHITE, bold = true).apply { text = t.date })
@@ -1902,19 +1902,29 @@ class MainActivity : Activity() {
         setTextColor(fg)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, bg, 22)
+        background = box(context, bg, 16, withAlpha(fg, 45))
         minHeight = 0
         minimumHeight = 0
     }
 
-    // Botão pequeno quadrado, para ícones
+    // Ícones vetoriais nítidos com a cor de destaque personalizada.
+    private fun Button.panelIcon(res: Int, color: Int = accent, size: Int = 21) {
+        val d = getDrawable(res)?.mutate() ?: return
+        d.setTint(color)
+        d.setBounds(0, 0, px(size), px(size))
+        setCompoundDrawables(d, null, null, null)
+        compoundDrawablePadding = px(5)
+        gravity = Gravity.CENTER
+    }
+
+    // Botões compactos de navegação
     private fun miniBtn(caption: String): Button = Button(this).apply {
         text = caption
         textSize = 16f
         setTextColor(Color.WHITE)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, BTN_BG, 12, BORDER)
+        background = box(context, BTN_BG, 16, withAlpha(accent, 105))
         minHeight = 0
         minimumHeight = 0
         setPadding(0, 0, 0, 0)
@@ -1924,8 +1934,8 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
         background = box(context, cCard, 14, cBorder)
-        setPadding(px(6), px(8), px(6), px(8))
-        addView(label(11f, cLabel, align = Gravity.CENTER).apply { text = title })
+        setPadding(px(6), px(12), px(6), px(12))
+        addView(label(11f, accent, bold = true, align = Gravity.CENTER).apply { text = title; letterSpacing = 0.07f })
         addView(value, LinearLayout.LayoutParams(MATCH, WRAP))
     }
 
@@ -2067,16 +2077,16 @@ class MainActivity : Activity() {
         }
 
         // Botões da trip: Iniciar/Finalizar, pausa manual (pequeno), Salvar e Zerar
-        tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f)
+        tripBtn = pill("▶ Iniciar", accent, Color.BLACK, 15f).apply { typeface = Typeface.DEFAULT_BOLD }
         tripBtn.setOnClickListener {
             if (tripStarted) finishTrip() else startTrip()
         }
-        pauseBtn = miniBtn("⏸")
+        pauseBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_pause, Color.WHITE) }
         pauseBtn.textSize = 14f
         pauseBtn.setOnClickListener { toggleManualPause() }
-        saveBtn = pill("Salvar", BTN_BG, Color.WHITE, 14f)
+        saveBtn = pill("Salvar", BTN_BG, Color.WHITE, 14f).apply { panelIcon(R.drawable.ravo_panel_save, accent, 16) }
         saveBtn.setOnClickListener { saveTrip() }
-        val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f)
+        val resetBtn = pill("Zerar", BTN_BG, cLabel, 14f).apply { panelIcon(R.drawable.ravo_panel_reset, cLabel, 16) }
         resetBtn.setOnClickListener { resetTrip() }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 2f).apply { setMargins(px(4), 0, px(4), 0) })
@@ -2170,20 +2180,20 @@ class MainActivity : Activity() {
         musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
 
         // Botões pequenos: mapa, trips salvas, configurações, 2D/3D e rotação
-        val mapBtn = miniBtn("🗺")
+        val mapBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_menu_map) }
         mapBtn.setOnClickListener { setScreen(1) }
-        val tripsBtn = miniBtn("📋")
+        val tripsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_trips) }
         tripsBtn.setOnClickListener { setScreen(2) }
-        val settingsBtn = miniBtn("⚙")
+        val settingsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_settings) }
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        val mode3dBtn = miniBtn(modeLabel())
+        val mode3dBtn = miniBtn(modeLabel()).apply { typeface = Typeface.DEFAULT_BOLD; setTextColor(accent) }
         modeBtns.add(mode3dBtn)
         mode3dBtn.setOnClickListener { toggle3D() }
-        val rotateBtn = miniBtn(orientLabel())
+        val rotateBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_orientation); contentDescription = "Orientação da tela" }
         rotateBtn.setOnClickListener {
             orientMode = (orientMode + 1) % 3
             applyOrientation()
-            rotateBtn.text = orientLabel()
+            rotateBtn.contentDescription = "Orientação: " + orientLabel()
         }
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
