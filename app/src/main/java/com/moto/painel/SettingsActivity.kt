@@ -308,9 +308,7 @@ class SettingsActivity : Activity() {
             b.text = "$label: ${cur()}$suffix"
         }
         show()
-        b.isAllCaps = false
-        b.setTextColor(Color.WHITE)
-        b.setBackgroundColor(0xFF14284A.toInt())
+        styleOptionButton(b)
         b.setOnClickListener {
             val idx = values.indexOf(cur())
             val next = values[(if (idx < 0) 0 else idx + 1) % values.size]
@@ -325,8 +323,12 @@ class SettingsActivity : Activity() {
         setText(value)
         setTextColor(Color.WHITE)
         setHintTextColor(0xFF7F93B5.toInt())
-        setBackgroundColor(0xFF14284A.toInt())
-        setPadding(dp(12), dp(12), dp(12), dp(12))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF14284A.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x55000000)
+        }
+        setPadding(dp(16), dp(14), dp(16), dp(14))
         setSingleLine(true)
     }
 }
