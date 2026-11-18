@@ -1151,7 +1151,7 @@ class MainActivity : Activity() {
         s.addLayer(
             LineLayer("route-outline-layer", "route-src").withProperties(
                 PropertyFactory.lineColor(0xFF152236.toInt()),
-                PropertyFactory.lineWidth(13f),
+                PropertyFactory.lineWidth(20f),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
@@ -1159,7 +1159,7 @@ class MainActivity : Activity() {
         s.addLayer(
             LineLayer("route-layer", "route-src").withProperties(
                 PropertyFactory.lineColor(0xFFFF7139.toInt()),
-                PropertyFactory.lineWidth(8f),
+                PropertyFactory.lineWidth(14f),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
@@ -1752,7 +1752,11 @@ class MainActivity : Activity() {
     // Atualiza o destaque e a visibilidade dos botões flutuantes do mapa
     private fun refreshMapButtons() {
         if (!::mapStyleBtn.isInitialized) return
-        voiceBtn.text = if (voiceOn) "♪" else "⊘"
+        voiceBtn.text = ""
+        voiceBtn.contentDescription = if (voiceOn) "Desativar instruções de voz" else "Ativar instruções de voz"
+        val speaker = getDrawable(if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off)?.mutate()
+        speaker?.setBounds(0, 0, px(24), px(24))
+        voiceBtn.setCompoundDrawables(null, speaker, null, null)
         setOn(voiceBtn, voiceOn)
         mapStyleBtn.text = when (mapMode) {
             1 -> "☀"
@@ -2387,7 +2391,7 @@ class MainActivity : Activity() {
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
-        voiceBtn = floatBtn("♪") {
+        voiceBtn = floatBtn("") {
             voiceOn = !voiceOn
             if (!voiceOn) tts?.stop()
             refreshMapButtons()
