@@ -385,7 +385,7 @@ class MainActivity : Activity() {
     private var voiceOn = true
     private var lastFix: Location? = null
     private val roadAlerts: RoadAlerts by lazy {
-        RoadAlerts(this, { message -> say(message) }, { refreshRoadAlerts() })
+        RoadAlerts(this, { message -> say(message) }, { refreshRoadAlerts() }, { message -> toast(message) })
     }
 
     private fun refreshRoadAlerts() {
@@ -574,6 +574,15 @@ class MainActivity : Activity() {
                     m.addOnCameraMoveStartedListener { reason ->
                         if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                             followMe = false
+                        }
+                    }
+                }
+                if (interactive) {
+                    m.addOnCameraIdleListener {
+                        // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
+                        if (m.cameraPosition.zoom >= 11.0 && !followMe) {
+                            val target = m.cameraPosition.target
+                            roadAlerts.fetchAt(target.latitude, target.longitude)
                         }
                     }
                 }
