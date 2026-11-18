@@ -13,7 +13,7 @@ import kotlin.math.min
  * 0..4 continuam com os marcadores anteriores.
  * O norte da imagem corresponde à frente da moto; a rotação é feita pelo MapLibre.
  */
-fun ravoPositionMarker(context: Context, model: Int, color: Int): Bitmap {
+fun ravoPositionMarker(context: Context, model: Int, color: Int, bagColor: Int = 0xFF2EA8FF.toInt()): Bitmap {
     if (model !in 5..10) return styledMarker(model, color)
     val files = arrayOf(
         "01_esportiva.png", "02_street.png", "03_trail.png",
@@ -47,8 +47,21 @@ fun ravoPositionMarker(context: Context, model: Int, color: Int): Bitmap {
         Color.colorToHSV(p, hsv)
         val brightness = hsv[2]
         val saturation = hsv[1]
-        if (brightness > 0.68f && saturation < 0.19f) {
-            // Mistura para preservar a textura e a iluminação do PNG.
+        if (model == 10) {
+            // No modelo de entrega, moto e bag têm cores independentes.
+            // As áreas azuis da metade traseira pertencem à bag.
+            val isBlue = hsv[0] in 175f..270f && saturation > 0.23f && brightness > 0.13f
+            if (isBlue) {
+                val y = i / original.width
+                val selected = if (y > original.height * 0.52f) bagColor else color
+                val chosen = FloatArray(3)
+                Color.colorToHSV(selected, chosen)
+                hsv[0] = chosen[0]
+                hsv[1] = chosen[1]
+                hsv[2] = (brightness * (0.30f + 0.70f * chosen[2])).coerceIn(0f, 1f)
+                pixels[i] = Color.HSVToColor(Color.alpha(p), hsv)
+            }
+        } else if (brightness > 0.68f && saturation < 0.19f) {
             hsv[0] = target[0]
             hsv[1] = target[1] * 0.82f
             hsv[2] = (brightness * (0.72f + target[2] * 0.28f)).coerceIn(0f, 1f)
