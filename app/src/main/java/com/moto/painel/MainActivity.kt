@@ -384,9 +384,14 @@ class MainActivity : Activity() {
     private var ttsReady = false
     private var voiceOn = true
     private var lastFix: Location? = null
-    private val roadAlerts by lazy { RoadAlerts(this, { say(it) }, {
-        holders.forEach { h -> h.alertSrc?.setGeoJson(roadAlerts.features()) }
-    }) }
+    private val roadAlerts: RoadAlerts by lazy {
+        RoadAlerts(this, { message -> say(message) }, { refreshRoadAlerts() })
+    }
+
+    private fun refreshRoadAlerts() {
+        val geo = roadAlerts.features()
+        holders.forEach { h -> h.alertSrc?.setGeoJson(geo) }
+    }
     private var steps: List<Step> = emptyList()
     private var stepIndex = 0
     private var announcedNear = false
@@ -1176,20 +1181,70 @@ class MainActivity : Activity() {
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
             )
         )
+        // Pontos fora da rota ficam discretos; sobre a rota ficam maiores.
+        val radarFilter = Expression.eq(Expression.get("type"), Expression.literal("radar"))
+        val bumpFilter = Expression.eq(Expression.get("type"), Expression.literal("lombada"))
+        val outside = Expression.eq(Expression.get("priority"), Expression.literal("other"))
+        val onRoute = Expression.eq(Expression.get("priority"), Expression.literal("route"))
+        val next = Expression.eq(Expression.get("priority"), Expression.literal("next"))
         s.addLayer(
-            CircleLayer("radar-layer", "alerts-src").withFilter(Expression.eq(Expression.get("type"), Expression.literal("radar"))).withProperties(
+            CircleLayer("radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, outside)).withProperties(
                 PropertyFactory.circleColor(0xFFFF4D4D.toInt()),
-                PropertyFactory.circleRadius(8f),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleOpacity(0.65f),
                 PropertyFactory.circleStrokeColor(Color.WHITE),
-                PropertyFactory.circleStrokeWidth(2f)
+                PropertyFactory.circleStrokeWidth(1.5f)
             )
         )
         s.addLayer(
-            CircleLayer("bump-layer", "alerts-src").withFilter(Expression.eq(Expression.get("type"), Expression.literal("lombada"))).withProperties(
+            CircleLayer("bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, outside)).withProperties(
                 PropertyFactory.circleColor(0xFFFFC107.toInt()),
-                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleRadius(6f),
+                PropertyFactory.circleOpacity(0.65f),
                 PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
-                PropertyFactory.circleStrokeWidth(2f)
+                PropertyFactory.circleStrokeWidth(1.5f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("route-radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, onRoute)).withProperties(
+                PropertyFactory.circleColor(0xFFFF3030.toInt()),
+                PropertyFactory.circleRadius(12f),
+                PropertyFactory.circleStrokeColor(Color.WHITE),
+                PropertyFactory.circleStrokeWidth(3f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("route-bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, onRoute)).withProperties(
+                PropertyFactory.circleColor(0xFFFFC107.toInt()),
+                PropertyFactory.circleRadius(10f),
+                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
+                PropertyFactory.circleStrokeWidth(3f)
+            )
+        )
+        // Próximo obstáculo adiante tem halo de alto contraste.
+        s.addLayer(
+            CircleLayer("next-hazard-halo", "alerts-src").withFilter(next).withProperties(
+                PropertyFactory.circleColor(0xFFFFC107.toInt()),
+                PropertyFactory.circleRadius(20f),
+                PropertyFactory.circleOpacity(0.22f),
+                PropertyFactory.circleStrokeColor(Color.WHITE),
+                PropertyFactory.circleStrokeWidth(2.5f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("next-radar-layer", "alerts-src").withFilter(Expression.all(radarFilter, next)).withProperties(
+                PropertyFactory.circleColor(0xFFFF2222.toInt()),
+                PropertyFactory.circleRadius(15f),
+                PropertyFactory.circleStrokeColor(Color.WHITE),
+                PropertyFactory.circleStrokeWidth(3.5f)
+            )
+        )
+        s.addLayer(
+            CircleLayer("next-bump-layer", "alerts-src").withFilter(Expression.all(bumpFilter, next)).withProperties(
+                PropertyFactory.circleColor(0xFFFFD600.toInt()),
+                PropertyFactory.circleRadius(13f),
+                PropertyFactory.circleStrokeColor(0xFF152236.toInt()),
+                PropertyFactory.circleStrokeWidth(3.5f)
             )
         )
         s.addLayer(
@@ -1742,6 +1797,7 @@ class MainActivity : Activity() {
         stepIndex = if (list.size > 1) 1 else 0
 
         holders.forEach { refreshRoute(it) }
+        roadAlerts.setRoute(points)
 
         // Na primeira rota, mostra o trajeto inteiro no mapa grande (para de seguir até tocar em ◎)
         if (!isRecalc) {
@@ -1768,6 +1824,8 @@ class MainActivity : Activity() {
         stepIndex = 0
         offCount = 0
         holders.forEach { refreshRoute(it) }
+        roadAlerts.setRoute(emptyList())
+
         mapInstructionView.text = ""
         mapInfoView.text = ""
         navView.text = ""
