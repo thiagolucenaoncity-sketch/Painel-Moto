@@ -212,7 +212,7 @@ class RoadAlerts(
                         break
                     } catch (e: Exception) { failure = e }
                 }
-                val json = result ?: throw failure ?: java.io.IOException("Servidores indisponíveis")
+                val json = result ?: throw (failure ?: java.io.IOException("Servidores indisponíveis"))
                 val arr = json.getJSONArray("elements")
                 val found = LinkedHashMap<String, Hazard>()
                 for (i in 0 until arr.length()) {
