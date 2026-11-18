@@ -1917,8 +1917,16 @@ class MainActivity : Activity() {
         val d = this@MainActivity.getDrawable(res)?.mutate() ?: return
         d.setTint(color)
         d.setBounds(0, 0, px(size), px(size))
-        setCompoundDrawables(d, null, null, null)
-        compoundDrawablePadding = px(5)
+        if (text.isNullOrBlank()) {
+            // Ícone sozinho: drawable superior centralizado pelo próprio Button.
+            setCompoundDrawables(null, d, null, null)
+            compoundDrawablePadding = 0
+            setPadding(0, 0, 0, 0)
+        } else {
+            // Botões com legenda (Salvar/Zerar) mantêm ícone ao lado do texto.
+            setCompoundDrawables(d, null, null, null)
+            compoundDrawablePadding = px(5)
+        }
         gravity = Gravity.CENTER
     }
 
