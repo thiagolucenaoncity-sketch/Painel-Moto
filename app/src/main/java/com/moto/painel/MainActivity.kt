@@ -7,6 +7,7 @@ import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -70,6 +71,7 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.TransitionOptions
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
@@ -460,6 +462,8 @@ class MainActivity : Activity() {
     private var ttsReady = false
     private var voiceOn = true
     private var lastFix: Location? = null
+    // Posicao somente visual: ajustada a rota quando o GPS e suficientemente preciso.
+    private var mapFix: Location? = null
     // Rumo estabilizado: o mesmo valor controla mapa e marcador da moto.
     private var stableHeading = 0.0
     private var headingInitialized = false
@@ -647,6 +651,7 @@ class MainActivity : Activity() {
             tripLast = loc
             updateStableHeading(loc)
             lastFix = loc
+            mapFix = mapDisplayLocation(loc)
             roadAlerts.onLocation(loc)
             roadSpeedSource.onLocation(loc)
 
@@ -655,13 +660,14 @@ class MainActivity : Activity() {
                 firstFixDone = true
                 followMe = true
                 holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
-                    .forEach { followCamera(it, loc, false) }
+                    .forEach { followCamera(it, mapFix ?: loc, false) }
             } else if (followMe) {
-                // Só anima o mapa que está visível, sem renderizar duas câmeras por segundo.
+                // Camera e marcador usam EXATAMENTE o mesmo ponto no GPS.
+                // Sem interpolacao longa que fazia a moto andar na diagonal.
                 holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
-                    .forEach { followCamera(it, loc, true) }
+                    .forEach { followCamera(it, mapFix ?: loc, false) }
             }
-            holders.forEach { updateMeMarker(it, loc) }
+            holders.forEach { updateMeMarker(it, mapFix ?: loc) }
             onFix(loc)
         }
 
@@ -715,6 +721,9 @@ class MainActivity : Activity() {
         var routeSrc: GeoJsonSource? = null
         var destSrc: GeoJsonSource? = null
         var alertSrc: GeoJsonSource? = null
+        // Evita reenviar o mesmo marcador a cada GPS, causando reprocessamento.
+        var lastMarkerPosition: Location? = null
+        var lastMarkerScreenBearing = Double.NaN
 
         init {
             view.onCreate(null)
@@ -1296,6 +1305,10 @@ class MainActivity : Activity() {
 
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
+        h.lastMarkerPosition = null
+        h.lastMarkerScreenBearing = Double.NaN
+        // Desliga o fade padrao dos simbolos a cada atualização dos dados/tiles.
+        s.setTransition(TransitionOptions(0L, 0L, false))
         if (isNightNow()) applyNightTheme(s)
         s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
         // Ícones próprios; registrados novamente a cada troca de estilo claro/escuro.
@@ -1442,53 +1455,99 @@ class MainActivity : Activity() {
                 PropertyFactory.iconImage("me-icon"),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
-                PropertyFactory.iconRotate(Expression.get("bearing")),
-                // O ângulo GPS é relativo ao norte geográfico, não à tela.
-                // Evita a moto apontar ao contrário quando a câmera gira em 3D.
-                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconRotate(Expression.get("screenBearing")),
+                // O icone ja recebe angulo relativo a camera, ficando alinhado a via
+                // em vez de acompanhar uma rotacao diagonal inesperada.
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT),
                 PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT)
             )
         )
 
         refreshRoute(h)
         alerts.setGeoJson(roadAlerts.features())
-        lastFix?.let { loc ->
-            updateMeMarker(h, loc)
+        (mapFix ?: lastFix)?.let { loc ->
             followCamera(h, loc, false)
-        }
-        // Garante que o mapa já abre na inclinação escolhida
-        h.map?.let { m ->
-            m.easeCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
-                )
-            )
+            updateMeMarker(h, loc)
+        } ?: h.map?.let { m ->
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
+            ))
         }
     }
 
-    // Posiciona a câmera sobre você. Em 3D, o mapa gira com a direção do movimento.
+    // O ponto usado somente para o mapa pode ser projetado na rota conhecida.
+    // GPS e velocidade continuam com a medicao original, sem alterar a navegacao.
+    private fun mapDisplayLocation(loc: Location): Location {
+        if (routeDest == null || routePoints.size < 2 ||
+            (loc.hasAccuracy() && loc.accuracy > 30f)) return loc
+        val latScale = 111320.0
+        val lonScale = 111320.0 * cos(Math.toRadians(loc.latitude))
+        var bestDistance = Double.MAX_VALUE
+        var bestLat = loc.latitude
+        var bestLon = loc.longitude
+        for (i in 0 until routePoints.lastIndex) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            val dx = (b.longitude - a.longitude) * lonScale
+            val dy = (b.latitude - a.latitude) * latScale
+            val len2 = dx * dx + dy * dy
+            if (len2 < 0.01) continue
+            val px = (loc.longitude - a.longitude) * lonScale
+            val py = (loc.latitude - a.latitude) * latScale
+            val t = ((px * dx + py * dy) / len2).coerceIn(0.0, 1.0)
+            val diffX = px - t * dx
+            val diffY = py - t * dy
+            val dist2 = diffX * diffX + diffY * diffY
+            if (dist2 < bestDistance) {
+                bestDistance = dist2
+                bestLat = a.latitude + t * (b.latitude - a.latitude)
+                bestLon = a.longitude + t * (b.longitude - a.longitude)
+            }
+        }
+        if (bestDistance > 20.0 * 20.0) return loc
+        return Location(loc).apply {
+            latitude = bestLat
+            longitude = bestLon
+        }
+    }
+
+    // Perspectiva de navegacao tipo Waze: seu veiculo no centro horizontal,
+    // perto da parte inferior, com mais espaco para enxergar o caminho a frente.
     private fun followCamera(h: MapHolder, loc: Location, animate: Boolean) {
         val m = h.map ?: return
         val zoom = if (h.interactive) 17.0 else 16.0
         val bearing = if (is3D && headingInitialized) stableHeading else 0.0
+        val viewHeight = h.view.height.takeIf { it > 0 } ?: px(320)
         val pos = CameraPosition.Builder()
             .target(LatLng(loc.latitude, loc.longitude))
             .zoom(zoom)
             .tilt(if (is3D) 60.0 else 0.0)
             .bearing(bearing)
+            .padding(0.0, viewHeight * 0.48, 0.0, 0.0)
             .build()
         if (animate) {
-            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 800)
+            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 500)
         } else {
+            // Nao deixar a moto ir na diagonal enquanto a camera interpola entre GPSs.
             m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
         }
     }
 
     private fun updateMeMarker(h: MapHolder, loc: Location) {
         val src = h.meSrc ?: return
-        val f = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
-        f.addNumberProperty("bearing", stableHeading)
-        src.setGeoJson(f)
+        val cameraBearing = h.map?.cameraPosition?.bearing ?: 0.0
+        val screenBearing = ((stableHeading - cameraBearing + 540.0) % 360.0) - 180.0
+        val prev = h.lastMarkerPosition
+        val change = if (prev != null) prev.distanceTo(loc) else Float.MAX_VALUE
+        val deltaBearing = if (h.lastMarkerScreenBearing.isFinite()) {
+            kotlin.math.abs(((screenBearing - h.lastMarkerScreenBearing + 540.0) % 360.0) - 180.0)
+        } else Double.MAX_VALUE
+        if (change < 1.3f && deltaBearing < 2.0) return
+        h.lastMarkerPosition = Location(loc)
+        h.lastMarkerScreenBearing = screenBearing
+        val feature = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
+        feature.addNumberProperty("screenBearing", screenBearing)
+        src.setGeoJson(feature)
     }
 
     private fun refreshRoute(h: MapHolder) {
@@ -1515,7 +1574,7 @@ class MainActivity : Activity() {
             val m = h.map
             if (m != null) {
                 if (followMe) {
-                    lastFix?.let { followCamera(h, it, true) }
+                    (mapFix ?: lastFix)?.let { followCamera(h, it, true) }
                 } else {
                     m.easeCamera(
                         CameraUpdateFactory.newCameraPosition(
@@ -1533,7 +1592,7 @@ class MainActivity : Activity() {
 
     // Centraliza o mapa completo na sua posição e volta a seguir
     private fun recenter() {
-        val loc = lastFix
+        val loc = mapFix ?: lastFix
         if (loc == null) {
             toast("Aguardando sinal do GPS...")
             return
@@ -1815,7 +1874,7 @@ class MainActivity : Activity() {
         musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
         // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
         if (mode == 0 || mode == 1) {
-            lastFix?.let { loc ->
+            (mapFix ?: lastFix)?.let { loc ->
                 if (followMe) holders.filter { it.interactive == (mode == 1) }
                     .forEach { followCamera(it, loc, false) }
             }
