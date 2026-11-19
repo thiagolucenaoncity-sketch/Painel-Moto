@@ -411,6 +411,10 @@ class MainActivity : Activity() {
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
     private lateinit var cancelBtn: Button
+    // Um toque no mapa inteiro seleciona um ponto; a rota só começa após confirmar.
+    private var selectedMapPoint: LatLng? = null
+    private lateinit var mapPointCard: LinearLayout
+    private lateinit var mapPointCoordinates: TextView
 
     // Trips salvas
     private lateinit var tripsScreen: LinearLayout
@@ -682,6 +686,7 @@ class MainActivity : Activity() {
         var routeSrc: GeoJsonSource? = null
         var destSrc: GeoJsonSource? = null
         var alertSrc: GeoJsonSource? = null
+        var selectedPointSrc: GeoJsonSource? = null
 
         init {
             view.onCreate(null)
@@ -703,6 +708,10 @@ class MainActivity : Activity() {
                     }
                 }
                 if (interactive) {
+                    m.addOnMapClickListener { point ->
+                        selectMapPoint(point)
+                        true
+                    }
                     m.addOnCameraIdleListener {
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
@@ -1402,6 +1411,27 @@ class MainActivity : Activity() {
                 PropertyFactory.circleStrokeWidth(2f)
             )
         )
+        // Pino temporário do toque: aparece só no mapa interativo, nunca no minimapa.
+        if (h.interactive) {
+            val selectionSrc = GeoJsonSource("selected-point-src")
+            h.selectedPointSrc = selectionSrc
+            s.addSource(selectionSrc)
+            s.addLayer(
+                CircleLayer("selected-point-halo", "selected-point-src").withProperties(
+                    PropertyFactory.circleColor(0x6639A7FF),
+                    PropertyFactory.circleRadius(21f)
+                )
+            )
+            s.addLayer(
+                CircleLayer("selected-point-pin", "selected-point-src").withProperties(
+                    PropertyFactory.circleColor(accent),
+                    PropertyFactory.circleRadius(11f),
+                    PropertyFactory.circleStrokeColor(Color.WHITE),
+                    PropertyFactory.circleStrokeWidth(3f)
+                )
+            )
+            refreshSelectedPointOnMap(h)
+        }
         s.addLayer(
             SymbolLayer("me-layer", "me-src").withProperties(
                 PropertyFactory.iconImage("me-icon"),
@@ -1470,6 +1500,66 @@ class MainActivity : Activity() {
             ds.setGeoJson(EMPTY_GEO)
         } else {
             ds.setGeoJson(Feature.fromGeometry(Point.fromLngLat(d.longitude, d.latitude)))
+        }
+    }
+
+    // Seleção manual de destino: funciona com coordenadas, sem precisar de endereço.
+    private fun refreshSelectedPointOnMap(h: MapHolder) {
+        val source = h.selectedPointSrc ?: return
+        val point = selectedMapPoint
+        if (point == null) {
+            source.setGeoJson(EMPTY_GEO)
+        } else {
+            source.setGeoJson(
+                Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+            )
+        }
+    }
+
+    private fun selectMapPoint(point: LatLng) {
+        selectedMapPoint = point
+        followMe = false
+        holders.filter { it.interactive }.forEach { refreshSelectedPointOnMap(it) }
+        refreshMapPointCard()
+    }
+
+    private fun clearMapPoint() {
+        selectedMapPoint = null
+        holders.filter { it.interactive }.forEach { refreshSelectedPointOnMap(it) }
+        refreshMapPointCard()
+    }
+
+    private fun confirmMapPointRoute() {
+        val point = selectedMapPoint ?: return
+        if (lastFix == null) {
+            toast("Aguardando sinal do GPS para traçar a rota")
+            return
+        }
+        clearMapPoint()
+        routeTo(point.latitude, point.longitude, "Ponto escolhido no mapa")
+    }
+
+    private fun refreshMapPointCard() {
+        if (!::mapPointCard.isInitialized) return
+        val point = selectedMapPoint
+        mapPointCard.visibility = if (point != null) View.VISIBLE else View.GONE
+        if (point != null) {
+            mapPointCoordinates.text = String.format(
+                Locale.US, "Destino: %.5f, %.5f", point.latitude, point.longitude
+            )
+        }
+        // O indicador do limite da via continua acessível acima do cartão.
+        if (::fullRoadLimitPlate.isInitialized) {
+            val lp = fullRoadLimitPlate.layoutParams as? FrameLayout.LayoutParams
+            if (lp != null) {
+                val margin = if (point != null) {
+                    px(98) + mapPointCard.height.coerceAtLeast(px(110)) + px(10)
+                } else px(106)
+                if (lp.bottomMargin != margin) {
+                    lp.bottomMargin = margin
+                    fullRoadLimitPlate.layoutParams = lp
+                }
+            }
         }
     }
 
@@ -1939,6 +2029,7 @@ class MainActivity : Activity() {
         durS: Double,
         isRecalc: Boolean
     ) {
+        clearMapPoint()
         routePoints = points
         routeDest = dest
         routeName = name
@@ -2567,6 +2658,51 @@ class MainActivity : Activity() {
         frame.addView(offlineNotice, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
             topMargin = px(104)
         })
+
+        // Ao tocar uma rua, mostra uma confirmação discreta acima dos botões inferiores.
+        // Um toque diferente atualiza o ponto; cancelar não altera a rota atual.
+        mapPointCoordinates = label(12f, cLabel)
+        val mapPointActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                pill("Cancelar", BTN_BG, Color.WHITE, 14f).apply {
+                    setOnClickListener { clearMapPoint() }
+                },
+                LinearLayout.LayoutParams(0, px(42), 1f).apply { rightMargin = px(8) }
+            )
+            addView(
+                pill("Traçar rota", accent, Color.BLACK, 14f).apply {
+                    setOnClickListener { confirmMapPointRoute() }
+                },
+                LinearLayout.LayoutParams(0, px(42), 1.7f)
+            )
+        }
+        mapPointCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = box(this@MainActivity, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
+            setPadding(px(12), px(10), px(12), px(10))
+            addView(label(15f, Color.WHITE, bold = true).apply {
+                text = "Ponto selecionado no mapa"
+            }, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(mapPointCoordinates, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = px(3)
+            })
+            addView(mapPointActions, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = px(10)
+            })
+            visibility = if (selectedMapPoint == null) View.GONE else View.VISIBLE
+        }
+        frame.addView(mapPointCard, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply {
+            leftMargin = px(12)
+            rightMargin = px(12)
+            bottomMargin = px(84)
+        })
+        // Ajusta o recuo do limite da via à altura real do cartão.
+        mapPointCard.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) refreshMapPointCard()
+        }
+        refreshMapPointCard()
 
         // ----- Topo: pesquisa minimalista, favoritos e cartão de instrução -----
         val searchBox = LinearLayout(this).apply {
