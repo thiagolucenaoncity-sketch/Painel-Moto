@@ -68,6 +68,57 @@ def fetch_signals():
     raise RuntimeError("No complete statewide dataset obtained: " + " | ".join(errors))
 
 
+
+def fetch_from_pbf():
+    """Fallback extraction from the free São Paulo state OSM PBF."""
+    import osmium
+    import urllib.request
+
+    class Signals(osmium.SimpleHandler):
+        def __init__(self):
+            super().__init__()
+            self.rows = {}
+
+        def node(self, node):
+            if node.tags.get("highway") != "traffic_signals" or not node.location.valid():
+                return
+            lat, lon = node.location.lat, node.location.lon
+            if -25.6 <= lat <= -19.5 and -53.3 <= lon <= -43.5:
+                self.rows[f"osm:{node.id}"] = (lat, lon)
+
+    url = "https://geo2day.com/south_america/brazil/southeast/sao-paulo.pbf"
+    with tempfile.NamedTemporaryFile(prefix="ravo-sp-", suffix=".osm.pbf", delete=False) as temp:
+        filename = temp.name
+        try:
+            request = Request(url, headers={
+                "User-Agent": "RAVO/1.1 (statewide traffic-signal extraction; OSM ODbL)"
+            })
+            with urlopen(request, timeout=50) as response:
+                total = 0
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > 500 * 1024 * 1024:
+                        raise RuntimeError("State OSM PBF is larger than expected")
+                    temp.write(chunk)
+            temp.flush()
+            print(f"Downloaded São Paulo PBF: {total:,} bytes", flush=True)
+            collector = Signals()
+            collector.apply_file(filename)
+            items = sorted((key, *value) for key, value in collector.rows.items())
+            if len(items) < MIN_COUNT:
+                raise RuntimeError(f"Unexpectedly only {len(items)} mapped signals in SP PBF")
+            return items
+        finally:
+            try:
+                os.unlink(filename)
+            except OSError:
+                pass
+
+
+
 def existing_count(path):
     if not path.is_file():
         return 0
@@ -78,7 +129,12 @@ def existing_count(path):
 
 
 def main():
-    signals = fetch_signals()
+    # PBF estadual é mais confiável que uma consulta Overpass gigante.
+    try:
+        signals = fetch_from_pbf()
+    except Exception as error:
+        print(f"São Paulo PBF unavailable: {error}; trying Overpass", flush=True)
+        signals = fetch_signals()
     previous = existing_count(OUTPUT)
     if previous >= MIN_COUNT and len(signals) < previous * 0.75:
         raise RuntimeError(f"Refusing to shrink data from {previous} to {len(signals)}")
