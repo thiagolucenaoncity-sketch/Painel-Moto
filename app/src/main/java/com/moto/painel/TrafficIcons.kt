@@ -1,6 +1,8 @@
 package com.moto.painel
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -15,6 +17,37 @@ object TrafficIcons {
     private const val RED = 0xFFFF333C.toInt()
     private const val YELLOW = 0xFFFFCC18.toInt()
     private const val DARK = 0xFF172135.toInt()
+
+    // PNGs originais em assets/traffic_icons. Ajusta 1024px para 96px uma vez,
+    // antes de enviar ao MapLibre, para evitar imagens grandes na memória/GPU.
+    private val cached = mutableMapOf<String, Bitmap>()
+
+    fun load(context: Context, type: String): Bitmap = synchronized(cached) {
+        cached[type]?.let { return@synchronized it }
+        val bitmap = try {
+            val file = "traffic_icons/$type.png"
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.assets.open(file).use { BitmapFactory.decodeStream(it, null, bounds) }
+            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "PNG inválido" }
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= 96 &&
+                bounds.outHeight / (sample * 2) >= 96) sample *= 2
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val original = context.assets.open(file).use {
+                BitmapFactory.decodeStream(it, null, options)
+            } ?: error("Não foi possível carregar $file")
+            if (original.width == 96 && original.height == 96) original
+            else Bitmap.createScaledBitmap(original, 96, 96, true).also { original.recycle() }
+        } catch (_: Exception) {
+            // Compatibilidade: se faltar um arquivo, o app continua com o desenho antigo.
+            draw(type)
+        }
+        cached[type] = bitmap
+        bitmap
+    }
 
     fun draw(type: String): Bitmap {
         val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
