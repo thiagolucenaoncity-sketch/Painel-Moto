@@ -85,6 +85,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.Random
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -400,6 +401,7 @@ class MainActivity : Activity() {
 
     // Painel
     private lateinit var panelScreen: LinearLayout
+    private lateinit var panelEtaCard: RouteEtaCard
     private lateinit var minimap: MapView
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
@@ -432,6 +434,7 @@ class MainActivity : Activity() {
 
     // Mapa completo (tela cheia, com controles flutuantes por cima)
     private lateinit var mapScreen: FrameLayout
+    private lateinit var fullEtaCard: RouteEtaCard
     private lateinit var fullMap: MapView
     private lateinit var searchInput: EditText
     private lateinit var suggestScroll: ScrollView
@@ -557,6 +560,17 @@ class MainActivity : Activity() {
     private var routeDest: LatLng? = null
     private var routeName = ""
 
+    // Previsao OSRM: nao depende de trafego ao vivo. O GPS mede o progresso
+    // e atualiza a distancia, o tempo restante e o horario de chegada.
+    private var etaActive = false
+    private var etaProfile: RouteEtaCalculator.Profile? = null
+    private var routeEstimatedMeters = 0.0
+    private var routeEstimatedSeconds = 0.0
+    private var routeTraveledMeters = 0.0
+    private var etaRemainingMeters = 0.0
+    private var etaRemainingSeconds = 0.0
+    private val arrivalFormat = SimpleDateFormat("HH:mm", Locale("pt", "BR"))
+
     // Recálculo de rota
     private var offCount = 0
     private var lastRecalcMs = 0L
@@ -583,6 +597,7 @@ class MainActivity : Activity() {
             clockView.text = clockFmt.format(now)
             dateView.text = dateFmt.format(now)
             updateBattery()
+            refreshEtaPanels()
             updateTime()
             updateTripButtons()
             updateConnection()
@@ -670,7 +685,9 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, mapFix ?: loc, false) }
             }
             holders.forEach { updateMeMarker(it, mapFix ?: loc) }
+            updateEtaFromGps(loc)
             onFix(loc)
+            positionFullEtaCard()
         }
 
         override fun onProviderEnabled(provider: String) {}
@@ -747,6 +764,8 @@ class MainActivity : Activity() {
                     }
                 }
                 if (interactive) {
+                    // Mantem a previsao logo abaixo da moto ao mover ou girar o mapa.
+                    m.addOnCameraMoveListener { positionFullEtaCard() }
                     m.addOnCameraIdleListener {
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
@@ -1913,10 +1932,74 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, loc, false) }
             }
         }
+        if (mode == 1) fullEtaCard.post { positionFullEtaCard() }
         if (mode == 2) refreshTripsList()
     }
 
     // ---------- Navegação ----------
+
+    private fun updateEtaFromGps(loc: Location) {
+        val profile = etaProfile ?: return
+        if (!etaActive || (loc.hasAccuracy() && loc.accuracy > 65f)) return
+        val projection = RouteEtaCalculator.project(profile, loc.latitude, loc.longitude) ?: return
+        // Fora da via: mantem a ultima previsao ate a rota ser recalculada.
+        if (projection.offRouteMeters > 55.0) return
+        // Evita que ruído do GPS faça os quilômetros voltarem a aumentar.
+        routeTraveledMeters = maxOf(routeTraveledMeters, projection.progressMeters)
+        val remaining = RouteEtaCalculator.fractionRemaining(profile, routeTraveledMeters)
+        etaRemainingMeters = RouteEtaCalculator.distanceRemaining(routeEstimatedMeters, remaining)
+        etaRemainingSeconds = RouteEtaCalculator.durationRemaining(routeEstimatedSeconds, remaining)
+        refreshEtaPanels()
+    }
+
+    private fun refreshEtaPanels() {
+        if (!::panelEtaCard.isInitialized || !::fullEtaCard.isInitialized) return
+        if (!etaActive || routeDest == null) {
+            panelEtaCard.visibility = View.GONE
+            fullEtaCard.visibility = View.GONE
+            return
+        }
+        val minuteCount = ceil(etaRemainingSeconds.coerceAtLeast(0.0) / 60.0)
+            .toInt().coerceAtLeast(1)
+        val durationText = if (minuteCount >= 60) {
+            "${minuteCount / 60}h ${minuteCount % 60}min"
+        } else "${minuteCount} min"
+        val distanceText = String.format(Locale("pt", "BR"), "%.1f km",
+            etaRemainingMeters.coerceAtLeast(0.0) / 1000.0)
+        val arrival = arrivalFormat.format(
+            Date(System.currentTimeMillis() + (etaRemainingSeconds * 1000.0).toLong())
+        )
+        panelEtaCard.render(arrival, durationText, distanceText)
+        fullEtaCard.render(arrival, durationText, distanceText)
+        panelEtaCard.visibility = View.VISIBLE
+        if (screenMode == 1) fullEtaCard.post { positionFullEtaCard() }
+    }
+
+    // A bolha fica abaixo da motinho *na tela*, inclusive quando o mapa gira
+    // ou e arrastado. Nao substitui o icone e nem desloca a camera.
+    private fun positionFullEtaCard() {
+        if (!::fullEtaCard.isInitialized || !::fullMap.isInitialized ||
+            !etaActive || screenMode != 1) return
+        val loc = mapFix ?: lastFix ?: return
+        val map = holders.firstOrNull { it.interactive }?.map ?: return
+        val w = fullMap.width
+        val h = fullMap.height
+        val cardW = fullEtaCard.width
+        val cardH = fullEtaCard.height
+        if (w < px(160) || h < px(200) || cardW <= 0 || cardH <= 0) return
+        val marker = map.projection.toScreenLocation(LatLng(loc.latitude, loc.longitude))
+        // Se o usuario abriu o mapa longe da sua posicao, oculta o cartao.
+        if (marker.x < -px(16) || marker.x > w + px(16) ||
+            marker.y < -px(16) || marker.y > h + px(16)) {
+            fullEtaCard.visibility = View.INVISIBLE
+            return
+        }
+        val maxX = (w - cardW - px(8)).coerceAtLeast(px(8)).toFloat()
+        val maxY = (h - cardH - px(102)).coerceAtLeast(px(130)).toFloat()
+        fullEtaCard.x = (marker.x - cardW / 2f).coerceIn(px(8).toFloat(), maxX)
+        fullEtaCard.y = (marker.y + px(38)).coerceIn(px(130).toFloat(), maxY)
+        fullEtaCard.visibility = View.VISIBLE
+    }
 
     private fun onFix(loc: Location) {
         if (steps.isEmpty() || stepIndex >= steps.size) return
@@ -1946,8 +2029,10 @@ class MainActivity : Activity() {
                 showInstruction(next.text, "")
                 say(next.text)
             } else {
-                // A rota pode continuar desenhada, mas avisos de radar param ao chegar.
+                // A rota pode continuar desenhada, mas os dados de ETA somem ao chegar.
                 roadAlerts.stopNavigation()
+                etaActive = false
+                refreshEtaPanels()
                 showInstruction("Você chegou ao destino", "")
                 say("Você chegou ao destino")
             }
@@ -2072,6 +2157,16 @@ class MainActivity : Activity() {
         routePoints = points
         routeDest = dest
         routeName = name
+        etaActive = points.size > 1 && list.isNotEmpty()
+        etaProfile = RouteEtaCalculator.profile(points.map {
+            RouteEtaCalculator.Coordinate(it.latitude, it.longitude)
+        })
+        routeEstimatedMeters = totalM.coerceAtLeast(0.0)
+        routeEstimatedSeconds = durS.coerceAtLeast(0.0)
+        routeTraveledMeters = 0.0
+        etaRemainingMeters = routeEstimatedMeters
+        etaRemainingSeconds = routeEstimatedSeconds
+        lastFix?.let { updateEtaFromGps(it) }
         steps = list
         announcedNear = false
         offCount = 0
@@ -2097,10 +2192,18 @@ class MainActivity : Activity() {
             showInstruction(first.text, "Total ${fmtDist(totalM)} · cerca de ${(durS / 60).roundToInt()} min")
             say(if (isRecalc) "Rota recalculada. ${first.text}" else first.text)
         }
+        refreshEtaPanels()
         refreshMapButtons()
     }
 
     private fun clearRoute() {
+        etaActive = false
+        etaProfile = null
+        routeEstimatedMeters = 0.0
+        routeEstimatedSeconds = 0.0
+        etaRemainingMeters = 0.0
+        etaRemainingSeconds = 0.0
+        routeTraveledMeters = 0.0
         routePoints = emptyList()
         routeDest = null
         steps = emptyList()
@@ -2113,6 +2216,7 @@ class MainActivity : Activity() {
         mapInfoView.text = ""
         navView.text = ""
         navView.visibility = View.GONE
+        refreshEtaPanels()
         refreshMapButtons()
     }
 
@@ -2368,6 +2472,7 @@ class MainActivity : Activity() {
 
         setScreen(screenMode)
         updateTripButtons()
+        refreshEtaPanels()
         refreshMapButtons()
         return frame
     }
@@ -2402,6 +2507,9 @@ class MainActivity : Activity() {
         topBar.addView(clockView, LinearLayout.LayoutParams(0, WRAP, 1f))
         topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
         topBar.addView(rightCol, LinearLayout.LayoutParams(0, WRAP, 1f))
+
+        // Cartao de chegada acima do velocimetro, visivel somente na navegacao.
+        panelEtaCard = RouteEtaCard(this, accent)
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
         nickView = label(24f, accent, bold = true, align = Gravity.CENTER).apply {
@@ -2658,6 +2766,7 @@ class MainActivity : Activity() {
             // Paisagem: mapa maior à esquerda, dados empilhados à direita (ocupam a altura toda)
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            left.addView(panelEtaCard, gap(6))
             left.addView(vehicleView, gap(0))
             left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
@@ -2677,6 +2786,7 @@ class MainActivity : Activity() {
         } else {
             // Retrato: o player fica só no botão flutuante, por isso não entra aqui
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
+            root.addView(panelEtaCard, gap(6))
             root.addView(vehicleView, gap(0))
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
             root.addView(navView, gap(4))
@@ -2898,6 +3008,15 @@ class MainActivity : Activity() {
             addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         frame.addView(bottomCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+
+        // Sobreposto ao mapa, acompanha a posicao da moto em vez de ficar preso
+        // a um canto. Fundo translucido e contraste para leitura ao pilotar.
+        fullEtaCard = RouteEtaCard(this, accent)
+        frame.addView(fullEtaCard, FrameLayout.LayoutParams(px(238), WRAP,
+            Gravity.TOP or Gravity.START))
+        fullEtaCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            positionFullEtaCard()
+        }
 
         refreshFavChips()
         refreshMapButtons()
