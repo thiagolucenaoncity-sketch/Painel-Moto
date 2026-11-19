@@ -138,24 +138,25 @@ def main():
     previous = existing_count(OUTPUT)
     if previous >= MIN_COUNT and len(signals) < previous * 0.75:
         raise RuntimeError(f"Refusing to shrink data from {previous} to {len(signals)}")
-    data = io.StringIO(newline="")
-    writer = csv.writer(data, lineterminator="\n")
-    writer.writerow(("id", "lat", "lon"))
-    for osm_id, lat, lon in signals:
-        writer.writerow((osm_id, f"{lat:.7f}", f"{lon:.7f}"))
-    content = data.getvalue()
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    if OUTPUT.exists() and OUTPUT.read_text(encoding="utf-8") == content:
-        print(f"Unchanged: {len(signals)} mapped traffic signals")
-        return
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=OUTPUT.parent, delete=False) as handle:
-        handle.write(content)
-        temporary = Path(handle.name)
-    os.replace(temporary, OUTPUT)
-    print(f"Saved {len(signals)} mapped signals: {OUTPUT}, {len(content)} bytes")
+    # A fusão consome apenas fontes que existem/foram validadas nesta execução.
+    # Espelhos OSM não contam como fontes distintas.
+    from fuse_sp_traffic_signals import Record, read_source, fuse, save
+    base = [Record("osm", key, lat, lon) for key, lat, lon in signals]
+    folder = Path("data/traffic_sources")
+    additions = {file.stem: read_source(file, file.stem) for file in sorted(folder.glob("*.csv"))}
+    merged, report = fuse(base, additions)
+    if len(merged) < MIN_COUNT:
+        raise RuntimeError("Fusion unexpectedly removed too many signals")
+    save(merged, report)
+    print(f"Estado SP: {len(signals)} OSM, {len(merged)} pontos consolidados", flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-            summary.write(f"### Sao Paulo (OSM) — {len(signals)} mapped signals\n")
+            summary.write(
+                f"### Banco Inteligente RAVO SP\\n"
+                f"- OSM: {len(signals)} pontos\\n"
+                f"- Consolidado: {len(merged)} pontos\\n"
+                f"- Corroborações independentes: {report['cross_source_confirmations']}\\n"
+            )
 
 
 if __name__ == "__main__":
