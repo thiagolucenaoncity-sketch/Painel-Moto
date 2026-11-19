@@ -448,6 +448,9 @@ class MainActivity : Activity() {
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
+    private lateinit var mapToolsMenuBtn: Button
+    private lateinit var mapToolsColumn: LinearLayout
+    private var mapToolsExpanded = false
     private lateinit var panelNightBtn: Button
     private lateinit var panelVoiceBtn: Button
     private lateinit var cancelBtn: Button
@@ -687,7 +690,6 @@ class MainActivity : Activity() {
             holders.forEach { updateMeMarker(it, mapFix ?: loc) }
             updateEtaFromGps(loc)
             onFix(loc)
-            positionFullEtaCard()
         }
 
         override fun onProviderEnabled(provider: String) {}
@@ -764,8 +766,7 @@ class MainActivity : Activity() {
                     }
                 }
                 if (interactive) {
-                    // Mantem a previsao logo abaixo da moto ao mover ou girar o mapa.
-                    m.addOnCameraMoveListener { positionFullEtaCard() }
+                    // A previsao fica fixa no rodape, sem seguir o marcador.
                     m.addOnCameraIdleListener {
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
@@ -1932,7 +1933,6 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, loc, false) }
             }
         }
-        if (mode == 1) fullEtaCard.post { positionFullEtaCard() }
         if (mode == 2) refreshTripsList()
     }
 
@@ -1972,35 +1972,7 @@ class MainActivity : Activity() {
         panelEtaCard.render(arrival, durationText, distanceText)
         fullEtaCard.render(arrival, durationText, distanceText)
         panelEtaCard.visibility = View.VISIBLE
-        // INVISIBLE participa do layout: o mapa precisa medir o cartão antes
-        // de posicioná-lo abaixo da motinho. GONE deixaria largura/altura zero.
-        if (fullEtaCard.visibility == View.GONE) fullEtaCard.visibility = View.INVISIBLE
-        if (screenMode == 1) fullEtaCard.post { positionFullEtaCard() }
-    }
-
-    // A bolha fica abaixo da motinho *na tela*, inclusive quando o mapa gira
-    // ou e arrastado. Nao substitui o icone e nem desloca a camera.
-    private fun positionFullEtaCard() {
-        if (!::fullEtaCard.isInitialized || !::fullMap.isInitialized ||
-            !etaActive || screenMode != 1) return
-        val loc = mapFix ?: lastFix ?: return
-        val map = holders.firstOrNull { it.interactive }?.map ?: return
-        val w = fullMap.width
-        val h = fullMap.height
-        val cardW = fullEtaCard.width
-        val cardH = fullEtaCard.height
-        if (w < px(160) || h < px(200) || cardW <= 0 || cardH <= 0) return
-        val marker = map.projection.toScreenLocation(LatLng(loc.latitude, loc.longitude))
-        // Se o usuario abriu o mapa longe da sua posicao, oculta o cartao.
-        if (marker.x < -px(16) || marker.x > w + px(16) ||
-            marker.y < -px(16) || marker.y > h + px(16)) {
-            fullEtaCard.visibility = View.INVISIBLE
-            return
-        }
-        val maxX = (w - cardW - px(8)).coerceAtLeast(px(8)).toFloat()
-        val maxY = (h - cardH - px(102)).coerceAtLeast(px(130)).toFloat()
-        fullEtaCard.x = (marker.x - cardW / 2f).coerceIn(px(8).toFloat(), maxX)
-        fullEtaCard.y = (marker.y + px(38)).coerceIn(px(130).toFloat(), maxY)
+        // Previsao visivel e fixa na faixa inferior, independente da camera.
         fullEtaCard.visibility = View.VISIBLE
     }
 
@@ -2197,6 +2169,17 @@ class MainActivity : Activity() {
         }
         refreshEtaPanels()
         refreshMapButtons()
+    }
+
+    // Confirma antes de cancelar: evita toques acidentais durante a viagem.
+    private fun confirmCancelRoute() {
+        if (!hasRoute()) return
+        AlertDialog.Builder(this)
+            .setTitle("Cancelar rota?")
+            .setMessage("Você deseja mesmo cancelar a rota em andamento?")
+            .setNegativeButton("Não", null)
+            .setPositiveButton("Sim, cancelar") { _, _ -> clearRoute() }
+            .show()
     }
 
     private fun clearRoute() {
@@ -2567,15 +2550,23 @@ class MainActivity : Activity() {
             addView(arcView, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
+            // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
-                Gravity.TOP or Gravity.END).apply {
+                Gravity.TOP or Gravity.START).apply {
                     topMargin = px(8)
-                    rightMargin = px(8)
+                    leftMargin = px(8)
                 })
         }
 
-        // Mesmos controles do mapa completo na tela inicial: centralizar, noite e voz.
+        // Tela inicial: alvo de centralização no mesmo canto, um pouco menor.
         val miniCenterBtn = modernRecenterButton()
+        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(52), px(52),
+            Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(12)
+            bottomMargin = px(10)
+        })
+
+        // Voz e modo noturno um abaixo do outro, no alto à direita do minimapa.
         panelNightBtn = floatBtn("☾") { toggleNightOnPanel() }.apply {
             textSize = 23f
             contentDescription = "Alternar modo noturno"
@@ -2583,17 +2574,18 @@ class MainActivity : Activity() {
         panelVoiceBtn = floatBtn("") { toggleVoice() }.apply {
             contentDescription = "Alternar instruções de voz"
         }
-        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(58), px(58),
-            Gravity.BOTTOM or Gravity.START).apply {
-            leftMargin = px(12)
-            bottomMargin = px(10)
-        })
-        arcBlock.addView(panelNightBtn, FrameLayout.LayoutParams(px(48), px(48),
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = px(14) })
-        arcBlock.addView(panelVoiceBtn, FrameLayout.LayoutParams(px(48), px(48),
-            Gravity.BOTTOM or Gravity.END).apply {
+        val miniTools = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(panelNightBtn, LinearLayout.LayoutParams(px(46), px(46)))
+            addView(panelVoiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply {
+                topMargin = px(9)
+            })
+        }
+        arcBlock.addView(miniTools, FrameLayout.LayoutParams(WRAP, WRAP,
+            Gravity.TOP or Gravity.END).apply {
             rightMargin = px(12)
-            bottomMargin = px(14)
+            topMargin = px(10)
         })
 
         // Linha de navegação: fica numa linha só e desliza se for longa
@@ -2840,7 +2832,7 @@ class MainActivity : Activity() {
         frame.addView(roadLimitPlate(false), FrameLayout.LayoutParams(WRAP, WRAP,
             Gravity.BOTTOM or Gravity.START).apply {
                 leftMargin = px(16)
-                bottomMargin = px(106)
+                bottomMargin = px(195)
             })
         offlineNotice = label(12f, Color.WHITE, bold = true).apply {
             text = "SEM INTERNET · mapa salvo / cache"
@@ -2971,14 +2963,33 @@ class MainActivity : Activity() {
                 } else toast("Mapa ainda não está pronto")
             }
         }.apply { contentDescription = "Salvar esta área para usar sem internet" }
+        // Um unico botao abre/fecha os cinco controles do mapa na lateral direita.
+        mapToolsColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = if (mapToolsExpanded) View.VISIBLE else View.GONE
+            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+        }
+        mapToolsMenuBtn = floatBtn(if (mapToolsExpanded) "✕" else "☰") {
+            mapToolsExpanded = !mapToolsExpanded
+            mapToolsColumn.visibility = if (mapToolsExpanded) View.VISIBLE else View.GONE
+            mapToolsMenuBtn.text = if (mapToolsExpanded) "✕" else "☰"
+            mapToolsMenuBtn.contentDescription =
+                if (mapToolsExpanded) "Fechar ferramentas do mapa" else "Abrir ferramentas do mapa"
+        }.apply {
+            textSize = 25f
+            contentDescription = if (mapToolsExpanded) "Fechar ferramentas do mapa"
+                else "Abrir ferramentas do mapa"
+        }
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(mapToolsMenuBtn, LinearLayout.LayoutParams(px(52), px(52)))
+            addView(mapToolsColumn, LinearLayout.LayoutParams(WRAP, WRAP))
         }
         frame.addView(
             rightCol,
@@ -2987,19 +2998,43 @@ class MainActivity : Activity() {
             }
         )
 
-        // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
-        // Botao centralizador mais moderno, com icone vetorial e contorno colorido.
+        // ----- Inferior: cancelar acima do GPS (esquerda), ETA fixo no centro,
+        // e retorno para tela inicial à direita. Espaçamento evita toques errados. -----
         val gpsBtn = modernRecenterButton()
-        cancelBtn = floatBtn("✕") { clearRoute() }
-        val backBtn = floatBtn("⌂") { setScreen(0) }
+        cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
+            background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
+            contentDescription = "Cancelar rota com confirmação"
+        }
+        val leftControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                bottomMargin = px(24)
+            })
+            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
+        }
+        val backBtn = floatBtn("⌂") { setScreen(0) }.apply {
+            contentDescription = "Voltar à tela inicial do velocímetro"
+        }
+
+        // Faixa de chegada entre os dois controles inferiores, sem seguir a moto.
+        fullEtaCard = RouteEtaCard(this, accent)
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)))
+            gravity = Gravity.BOTTOM
+            addView(leftControls, LinearLayout.LayoutParams(px(62), WRAP).apply {
+                gravity = Gravity.BOTTOM
+            })
+            addView(fullEtaCard, LinearLayout.LayoutParams(0, WRAP, 1f).apply {
+                leftMargin = px(8)
+                rightMargin = px(8)
+                gravity = Gravity.BOTTOM
+                bottomMargin = px(5)
+            })
+            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                gravity = Gravity.BOTTOM
+                bottomMargin = px(6)
+            })
         }
         val attrib = label(9f, cLabel, align = Gravity.CENTER).apply {
             text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM · Alertas: Pardal (ODbL)"
@@ -3011,15 +3046,6 @@ class MainActivity : Activity() {
             addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         frame.addView(bottomCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
-
-        // Sobreposto ao mapa, acompanha a posicao da moto em vez de ficar preso
-        // a um canto. Fundo translucido e contraste para leitura ao pilotar.
-        fullEtaCard = RouteEtaCard(this, accent)
-        frame.addView(fullEtaCard, FrameLayout.LayoutParams(px(238), WRAP,
-            Gravity.TOP or Gravity.START))
-        fullEtaCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            positionFullEtaCard()
-        }
 
         refreshFavChips()
         refreshMapButtons()
