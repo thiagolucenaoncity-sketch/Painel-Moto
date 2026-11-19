@@ -386,18 +386,11 @@ class MainActivity : Activity() {
     private var locationStarted = false
     private var firstFixDone = false
 
-    // Player flutuante: posição absoluta do botão ♪ na tela
+    // Player ancorado às duas telas: posição fixa, sem arrastar.
     private var musicOpen = false
     private lateinit var musicDock: LinearLayout
     private lateinit var musicFab: Button
     private lateinit var musicPopup: LinearLayout
-    private var fabX = -1f
-    private var fabY = -1f
-    private var downRawX = 0f
-    private var downRawY = 0f
-    private var startFabX = 0f
-    private var startFabY = 0f
-    private var fabMoved = false
 
     // Painel
     private lateinit var panelScreen: LinearLayout
@@ -699,40 +692,6 @@ class MainActivity : Activity() {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
-    // Toque no botão ♪: arrastar move o botão (e o player junto); um toque simples abre ou fecha o player
-    private val fabTouch = View.OnTouchListener { _, e ->
-        when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downRawX = e.rawX
-                downRawY = e.rawY
-                startFabX = fabX
-                startFabY = fabY
-                fabMoved = false
-                true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                if (abs(e.rawX - downRawX) > 12 || abs(e.rawY - downRawY) > 12) fabMoved = true
-                if (fabMoved) {
-                    fabX = startFabX + (e.rawX - downRawX)
-                    fabY = startFabY + (e.rawY - downRawY)
-                    applyFabLayout()
-                }
-                true
-            }
-            MotionEvent.ACTION_UP -> {
-                if (fabMoved) {
-                    Prefs.putRaw(this@MainActivity, "dock_x", fabX.roundToInt())
-                    Prefs.putRaw(this@MainActivity, "dock_y", fabY.roundToInt())
-                    Prefs.putRaw(this@MainActivity, "dock_set", 1)
-                } else {
-                    musicFab.performClick()
-                }
-                true
-            }
-            else -> true
-        }
-    }
-
     // Um mapa: MapView + estilo + camadas (posição, rota, destino e prédios 3D)
     private inner class MapHolder(val interactive: Boolean) {
         val view: MapView = MapView(this@MainActivity)
@@ -787,12 +746,6 @@ class MainActivity : Activity() {
         hideStatusBar()
         MapLibre.getInstance(this)
         OfflineMaps.configure(this)
-
-        // Posição salva do botão ♪ (se o usuário já arrastou)
-        if (Prefs.getInt(this, "dock_set") == 1) {
-            fabX = Prefs.getInt(this, "dock_x").toFloat()
-            fabY = Prefs.getInt(this, "dock_y").toFloat()
-        }
 
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -1187,67 +1140,75 @@ class MainActivity : Activity() {
         b.alpha = if (enabled) 1f else 0.4f
     }
 
-    // ---------- Player flutuante (o botão decide para onde o player abre) ----------
-
-    // Posiciona o botão ♪ e o player conforme o lado da tela em que o botão está
+    // ---------- Player de música: botão fixo em cada tela ----------
+    //
+    // Coordenadas relativas à raiz da Activity, não à posição geográfica da
+    // câmera. Isso impede que a navegação/zoom ou a troca 2D/3D mova o botão.
+    // Na tela inicial fica na mesma linha do nome/modelo, mas fora do minimapa.
+    // No mapa completo fica abaixo da busca; com rota ativa, abaixo da instrução.
     private fun applyFabLayout() {
+        if (!::musicDock.isInitialized || !::musicFab.isInitialized) return
         val parent = musicDock.parent as? View ?: return
-        val pw = parent.width
-        val ph = parent.height
-        if (pw == 0 || ph == 0) return
+        if (parent.width <= 0 || parent.height <= 0) return
 
-        val s = px(56)
-        val gap = px(8)
-        val popupW = px(280)
-
-        // Primeira vez: canto inferior direito
-        if (fabX < 0f) {
-            fabX = (pw - s - px(16)).toFloat()
-            fabY = (ph - s - px(16)).toFloat()
+        val buttonSize = px(56)
+        val popupWidth = px(280).coerceAtMost((parent.width - px(32)).coerceAtLeast(px(160)))
+        val popupLp = LinearLayout.LayoutParams(popupWidth, WRAP).apply {
+            gravity = Gravity.START
+            topMargin = px(8)
         }
-        fabX = fabX.coerceIn(0f, (pw - s).toFloat())
-        fabY = fabY.coerceIn(0f, (ph - s).toFloat())
-
-        // Lado: direita ou esquerda; metade: embaixo ou em cima
-        val onRight = fabX + s / 2f > pw / 2f
-        val onBottom = fabY + s / 2f > ph / 2f
-        val align = if (onRight) Gravity.END else Gravity.START
-
-        // Ordem dos filhos: se o botão está embaixo, o player vai acima dele; senão, abaixo
-        val popupLp = LinearLayout.LayoutParams(popupW, WRAP).apply {
-            gravity = align
-            if (onBottom) bottomMargin = gap else topMargin = gap
+        val fabLp = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+            gravity = Gravity.START
         }
-        val fabLp = LinearLayout.LayoutParams(s, s).apply { gravity = align }
-        val first: View = if (onBottom) musicPopup else musicFab
-        val second: View = if (onBottom) musicFab else musicPopup
-        if (musicDock.childCount != 2 || musicDock.getChildAt(0) != first) {
+        // Sempre abaixo do botão, para não cobrir o nome da moto nem a busca.
+        if (musicDock.childCount != 2 ||
+            musicDock.getChildAt(0) !== musicFab ||
+            musicDock.getChildAt(1) !== musicPopup) {
             musicDock.removeAllViews()
-            musicDock.addView(first, if (onBottom) popupLp else fabLp)
-            musicDock.addView(second, if (onBottom) fabLp else popupLp)
-        } else {
-            musicDock.updateViewLayout(first, if (onBottom) popupLp else fabLp)
-            musicDock.updateViewLayout(second, if (onBottom) fabLp else popupLp)
+            musicDock.addView(musicFab, fabLp)
+            musicDock.addView(musicPopup, popupLp)
         }
-        musicDock.gravity = align
 
-        // Tamanho atual do bloco (player aberto ou só o botão)
-        val popupH = if (musicPopup.height > 0) musicPopup.height else px(200)
-        val dw = if (musicOpen) popupW else s
-        val dh = if (musicOpen) popupH + gap + s else s
+        val parentLocation = IntArray(2)
+        parent.getLocationOnScreen(parentLocation)
+        val anchorY: Float = if (screenMode == 0 && ::vehicleView.isInitialized) {
+            val vehicleLocation = IntArray(2)
+            vehicleView.getLocationOnScreen(vehicleLocation)
+            // Centraliza na altura da linha de dados da moto.
+            val vehicleHeight = vehicleView.height.takeIf { it > 0 } ?: px(54)
+            (vehicleLocation[1] - parentLocation[1] + vehicleHeight / 2f -
+                buttonSize / 2f)
+        } else if (screenMode == 1 && ::searchInput.isInitialized &&
+            ::instrCard.isInitialized) {
+            val anchor = if (hasRoute() && instrCard.visibility == View.VISIBLE)
+                instrCard else searchInput.parent as View
+            val anchorLocation = IntArray(2)
+            anchor.getLocationOnScreen(anchorLocation)
+            (anchorLocation[1] - parentLocation[1] + anchor.height + px(12)).toFloat()
+        } else {
+            px(80).toFloat()
+        }
 
-        var dx = if (onRight) fabX + s - dw else fabX
-        var dy = if (onBottom) fabY + s - dh else fabY
-        dx = dx.coerceIn(0f, maxOf(0f, (pw - dw).toFloat()))
-        dy = dy.coerceIn(0f, maxOf(0f, (ph - dh).toFloat()))
-        musicDock.translationX = dx
-        musicDock.translationY = dy
+        val left = if (screenMode == 0) px(16) else px(24)
+        val maxLeft = (parent.width - if (musicOpen) popupWidth else buttonSize)
+            .coerceAtLeast(px(8))
+        val contentHeight = buttonSize + if (musicOpen) {
+            (musicPopup.height.takeIf { it > 0 } ?: px(160)) + px(8)
+        } else 0
+        val maxTop = (parent.height - contentHeight - px(8)).coerceAtLeast(0)
+        musicDock.translationX = left.coerceAtMost(maxLeft).toFloat()
+        musicDock.translationY = anchorY.coerceIn(0f, maxTop.toFloat())
     }
 
     private fun toggleMusic() {
         musicOpen = !musicOpen
         musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
-        musicFab.text = if (musicOpen) "✕" else "♪"
+        musicFab.panelIcon(
+            if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_music,
+            Color.WHITE, 27
+        )
+        musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
+            else "Abrir player de áudio"
         musicDock.post { applyFabLayout() }
     }
 
@@ -1926,6 +1887,7 @@ class MainActivity : Activity() {
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
         musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
+        if (mode == 0 || mode == 1) musicDock.post { applyFabLayout() }
         // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
         if (mode == 0 || mode == 1) {
             (mapFix ?: lastFix)?.let { loc ->
@@ -2242,6 +2204,8 @@ class MainActivity : Activity() {
         cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
+        // Ao iniciar/cancelar rota o player muda de âncora, mas não pode flutuar com GPS.
+        musicDock.post { applyFabLayout() }
     }
 
     // Traduz a manobra do OSRM para uma frase em português
@@ -2454,6 +2418,10 @@ class MainActivity : Activity() {
 
         // Player: bloco que fica no lugar do botão ♪ (ele mesmo calcula a posição)
         frame.addView(musicDock, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START))
+        // Reposiciona somente quando as telas mudam de tamanho, não no GPS.
+        frame.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            musicDock.post { applyFabLayout() }
+        }
         musicDock.post { applyFabLayout() }
 
         setScreen(screenMode)
@@ -2706,28 +2674,34 @@ class MainActivity : Activity() {
             musicDock.post { applyFabLayout() }
         }
 
-        // Botão flutuante ♪ / ✕
+        // Botão do player com ícone vetorial premium (nota musical sobre disco).
+        // Não é arrastável: âncora depende somente da tela e da rota.
         musicFab = Button(this).apply {
-            text = if (musicOpen) "✕" else "♪"
-            textSize = 22f
-            setTextColor(Color.BLACK)
+            text = ""
+            panelIcon(
+                if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_music,
+                Color.WHITE, 27
+            )
+            contentDescription = if (musicOpen) "Fechar player de áudio"
+                else "Abrir player de áudio"
             isAllCaps = false
             stateListAnimator = null
-            background = box(context, accent, 28)
+            background = box(context, accent, 28, 0x77FFFFFF)
+            elevation = pxF(5f)
             minHeight = 0
             minimumHeight = 0
             setPadding(0, 0, 0, 0)
             setOnClickListener { toggleMusic() }
-            setOnTouchListener(fabTouch)
         }
 
-        // Bloco do player: botão e painel. A ordem e o alinhamento são definidos em applyFabLayout
         musicDock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
+            gravity = Gravity.START
         }
-        musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP))
         musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
+        musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP).apply {
+            topMargin = px(8)
+        })
 
         // Botões pequenos: mapa, trips salvas, configurações, 2D/3D e rotação
         val mapBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_menu_map) }
@@ -2930,6 +2904,10 @@ class MainActivity : Activity() {
             addView(instrCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
         }
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+        // O texto da instrução pode crescer de uma para duas linhas.
+        instrCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            musicDock.post { applyFabLayout() }
+        }
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
         voiceBtn = floatBtn("") { toggleVoice() }
