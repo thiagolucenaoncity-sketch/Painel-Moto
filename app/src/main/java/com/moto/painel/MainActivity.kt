@@ -2963,14 +2963,33 @@ class MainActivity : Activity() {
                 } else toast("Mapa ainda não está pronto")
             }
         }.apply { contentDescription = "Salvar esta área para usar sem internet" }
+        // Um unico botao abre/fecha os cinco controles do mapa na lateral direita.
+        mapToolsColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = if (mapToolsExpanded) View.VISIBLE else View.GONE
+            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+        }
+        mapToolsMenuBtn = floatBtn(if (mapToolsExpanded) "✕" else "☰") {
+            mapToolsExpanded = !mapToolsExpanded
+            mapToolsColumn.visibility = if (mapToolsExpanded) View.VISIBLE else View.GONE
+            mapToolsMenuBtn.text = if (mapToolsExpanded) "✕" else "☰"
+            mapToolsMenuBtn.contentDescription =
+                if (mapToolsExpanded) "Fechar ferramentas do mapa" else "Abrir ferramentas do mapa"
+        }.apply {
+            textSize = 25f
+            contentDescription = if (mapToolsExpanded) "Fechar ferramentas do mapa"
+                else "Abrir ferramentas do mapa"
+        }
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
-            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { setMargins(0, px(6), 0, px(6)) })
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(mapToolsMenuBtn, LinearLayout.LayoutParams(px(52), px(52)))
+            addView(mapToolsColumn, LinearLayout.LayoutParams(WRAP, WRAP))
         }
         frame.addView(
             rightCol,
