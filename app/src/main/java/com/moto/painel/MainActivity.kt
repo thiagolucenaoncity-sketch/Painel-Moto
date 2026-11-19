@@ -337,8 +337,9 @@ class MainActivity : Activity() {
     // Estilo do mapa: 0 = automático, 1 = claro, 2 = escuro (azul noite)
     private var mapMode = 0
 
-    // Inclinação 3D do mapa (independente da opção de prédios)
-    private var is3D = false
+    // O RAVO inicia em perspectiva 3D (inclinação de câmera).
+    // O botão 2D/3D alterna a visualização sem mudar a configuração dos prédios.
+    private var is3D = true
     private val modeBtns = ArrayList<Button>()
 
     // Seguir a posição: fica falso quando o usuário arrasta o mapa
@@ -2010,7 +2011,10 @@ class MainActivity : Activity() {
             else -> "◐"
         }
         setOn(mapStyleBtn, mapMode != 0)
-        setOn(mapTiltBtn, is3D)
+        // Mesma indicação do botão do velocímetro: mostra o modo para o qual alterna.
+        mapTiltBtn.text = modeLabel()
+        mapTiltBtn.contentDescription = "Alternar mapa para ${modeLabel()}"
+        mapTiltBtn.setTextColor(accent)
         cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
@@ -2669,7 +2673,13 @@ class MainActivity : Activity() {
             applyMapStyle()
             refreshMapButtons()
         }
-        mapTiltBtn = floatBtn("◈") { toggle3D() }
+        // Igual ao botão 2D/3D do painel do velocímetro, sem símbolo diferente.
+        mapTiltBtn = floatBtn(modeLabel()) { toggle3D() }.apply {
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 16f
+            setTextColor(accent)
+            contentDescription = "Alternar mapa para ${modeLabel()}"
+        }
         val mapRotateBtn = floatBtn("") {
             orientMode = (orientMode + 1) % 3
             applyOrientation()
@@ -2704,13 +2714,17 @@ class MainActivity : Activity() {
         )
 
         // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
-        val gpsBtn = floatBtn("◎") { recenter() }
+        // Centralização ligeiramente maior e mais legível na tela inteira.
+        val gpsBtn = floatBtn("◎") { recenter() }.apply {
+            textSize = 23f
+            contentDescription = "Centralizar mapa na minha localização"
+        }
         cancelBtn = floatBtn("✕") { clearRoute() }
         val backBtn = floatBtn("⌂") { setScreen(0) }
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(gpsBtn, LinearLayout.LayoutParams(px(50), px(50)))
+            addView(gpsBtn, LinearLayout.LayoutParams(px(56), px(56)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
             addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
