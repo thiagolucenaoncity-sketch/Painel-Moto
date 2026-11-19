@@ -155,6 +155,7 @@ class SettingsActivity : Activity() {
             java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale("pt", "BR")).format(java.util.Date(updatedAt))
         else "base incluída no APK"
         add(col, note("Radares e lombadas de São Paulo são consultados diretamente no celular, mesmo sem internet. A base Pardal (ODbL) é verificada para atualização automática a cada 15 dias quando o app estiver aberto e conectado. Última atualização: $updatedLabel. Em caso de falha, os dados anteriores permanecem."), 12)
+        add(col, note("Limite de velocidade: a plaquinha ao lado de cada radar mostra a velocidade cadastrada para aquele radar (quando disponível). A placa VIA mostra o maxspeed da via mapeada no OpenStreetMap, de forma separada. Sem dado confiável, a placa VIA fica oculta. O último trecho consultado é mantido em cache para uso sem conexão; a sinalização da rua prevalece."), 12)
         add(col, note("Semáforos: o RAVO prioriza a base de São Paulo incluída no APK e guarda as atualizações no celular (até a cada 15 dias, com conexão). Se a base estadual ainda não estiver disponível, mantém a consulta por região e o cache. Os ícones NÃO indicam se o sinal está verde, amarelo ou vermelho; pontos podem faltar ou estar desatualizados."), 12)
     }
 
