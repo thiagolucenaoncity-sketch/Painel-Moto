@@ -413,6 +413,34 @@ class MainActivity : Activity() {
     private var ttsReady = false
     private var voiceOn = true
     private var lastFix: Location? = null
+    // Rumo estabilizado: o mesmo valor controla mapa e marcador da moto.
+    private var stableHeading = 0.0
+    private var headingInitialized = false
+    private var previousHeadingFix: Location? = null
+
+    private fun updateStableHeading(loc: Location) {
+        if (!loc.hasSpeed() || loc.speed < 2.7f || (loc.hasAccuracy() && loc.accuracy > 35f)) return
+        val old = previousHeadingFix
+        val moveHeading = if (old != null && old.distanceTo(loc) >= 7f) old.bearingTo(loc).toDouble() else null
+        val gpsHeading = if (loc.hasBearing() &&
+            (!loc.hasBearingAccuracy() || loc.bearingAccuracyDegrees <= 35f)) loc.bearing.toDouble() else null
+        if (moveHeading != null || old == null) previousHeadingFix = Location(loc)
+        val target = when {
+            gpsHeading != null && moveHeading != null -> {
+                val mismatch = kotlin.math.abs(((gpsHeading - moveHeading + 540.0) % 360.0) - 180.0)
+                if (mismatch > 85.0) moveHeading else gpsHeading
+            }
+            gpsHeading != null -> gpsHeading
+            else -> moveHeading ?: return
+        }
+        if (!headingInitialized) {
+            stableHeading = (target + 360.0) % 360.0
+            headingInitialized = true
+        } else {
+            val delta = ((target - stableHeading + 540.0) % 360.0) - 180.0
+            stableHeading = (stableHeading + delta * 0.42 + 360.0) % 360.0
+        }
+    }
     private val roadAlerts: RoadAlerts by lazy {
         RoadAlerts(this, { message -> say(message) }, { refreshRoadAlerts() }, { message -> toast(message) })
     }
@@ -522,6 +550,7 @@ class MainActivity : Activity() {
             }
             distView.text = distText(totalM)
             tripLast = loc
+            updateStableHeading(loc)
             lastFix = loc
             roadAlerts.onLocation(loc)
 
@@ -529,9 +558,12 @@ class MainActivity : Activity() {
             if (!firstFixDone) {
                 firstFixDone = true
                 followMe = true
-                holders.forEach { followCamera(it, loc, false) }
+                holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
+                    .forEach { followCamera(it, loc, false) }
             } else if (followMe) {
-                holders.forEach { followCamera(it, loc, true) }
+                // Só anima o mapa que está visível, sem renderizar duas câmeras por segundo.
+                holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
+                    .forEach { followCamera(it, loc, true) }
             }
             holders.forEach { updateMeMarker(it, loc) }
             onFix(loc)
@@ -1242,9 +1274,9 @@ class MainActivity : Activity() {
         for (kind in listOf("radar", "lombada", "semaforo")) {
             for (priority in listOf("other", "route", "next")) {
                 val scale = when (priority) {
-                    "next" -> 0.67f
-                    "route" -> 0.53f
-                    else -> if (kind == "semaforo") 0.28f else 0.34f
+                    "next" -> if (kind == "semaforo") 0.94f else 1.15f
+                    "route" -> if (kind == "semaforo") 0.74f else 0.94f
+                    else -> if (kind == "semaforo") 0.54f else 0.69f
                 }
                 val alpha = if (priority == "other") 0.72f else 1f
                 s.addLayer(
@@ -1276,7 +1308,11 @@ class MainActivity : Activity() {
                 PropertyFactory.iconImage("me-icon"),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
-                PropertyFactory.iconRotate(Expression.get("bearing"))
+                PropertyFactory.iconRotate(Expression.get("bearing")),
+                // O ângulo GPS é relativo ao norte geográfico, não à tela.
+                // Evita a moto apontar ao contrário quando a câmera gira em 3D.
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT)
             )
         )
 
@@ -1300,11 +1336,7 @@ class MainActivity : Activity() {
     private fun followCamera(h: MapHolder, loc: Location, animate: Boolean) {
         val m = h.map ?: return
         val zoom = if (h.interactive) 17.0 else 16.0
-        val bearing = when {
-            !is3D -> 0.0
-            loc.hasBearing() && loc.speed > 1f -> loc.bearing.toDouble()
-            else -> m.cameraPosition.bearing
-        }
+        val bearing = if (is3D && headingInitialized) stableHeading else 0.0
         val pos = CameraPosition.Builder()
             .target(LatLng(loc.latitude, loc.longitude))
             .zoom(zoom)
@@ -1321,8 +1353,7 @@ class MainActivity : Activity() {
     private fun updateMeMarker(h: MapHolder, loc: Location) {
         val src = h.meSrc ?: return
         val f = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
-        val heading = if (loc.hasBearing() && loc.speed > 1f) loc.bearing.toDouble() else 0.0
-        f.addNumberProperty("bearing", heading)
+        f.addNumberProperty("bearing", stableHeading)
         src.setGeoJson(f)
     }
 
@@ -1648,6 +1679,13 @@ class MainActivity : Activity() {
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
         musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
+        // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
+        if (mode == 0 || mode == 1) {
+            lastFix?.let { loc ->
+                if (followMe) holders.filter { it.interactive == (mode == 1) }
+                    .forEach { followCamera(it, loc, false) }
+            }
+        }
         if (mode == 2) refreshTripsList()
     }
 
