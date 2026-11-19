@@ -268,16 +268,28 @@ class RoadAlerts(
     private fun readBundled(): List<Hazard> {
         bundled?.let { return it }
         val points = ArrayList<Hazard>()
+        // Consolida apenas radares FIXED compatíveis. A média já é usada
+        // tanto para o ícone quanto para voz/bipes, sem duplicar alertas.
+        // SECTION/RED_LIGHT e lombadas continuam com os pontos originais.
+        val rawRadars = ArrayList<RadarDeduplicator.Record>()
         RadarDatabaseUpdater.reader(context, "sp_radares.csv").useLines { lines ->
             lines.drop(1).forEachIndexed { i, line ->
                 val columns = line.split(',')
                 if (columns.size < 9 || columns[5] != "1") return@forEachIndexed
                 val lat = columns[0].toDoubleOrNull() ?: return@forEachIndexed
                 val lon = columns[1].toDoubleOrNull() ?: return@forEachIndexed
-                // Inclui radares FIXED, SECTION e RED_LIGHT, todos tratados como radar.
-                points.add(Hazard("pardal:radar:$i", lat, lon, "radar",
-                    columns[3].filter { it.isDigit() }, columns[8].toFloatOrNull()))
+                rawRadars.add(RadarDeduplicator.Record(
+                    id = "pardal:radar:$i",
+                    lat = lat, lon = lon, kind = columns[2],
+                    limit = columns[3].filter { it.isDigit() },
+                    direction = columns[8].toFloatOrNull(),
+                    source = columns[4]
+                ))
             }
+        }
+        RadarDeduplicator.consolidate(rawRadars).forEach { radar ->
+            points.add(Hazard(radar.id, radar.lat, radar.lon, "radar",
+                radar.limit, radar.direction))
         }
         RadarDatabaseUpdater.reader(context, "sp_lombadas.csv").useLines { lines ->
             lines.drop(1).forEachIndexed { i, line ->
