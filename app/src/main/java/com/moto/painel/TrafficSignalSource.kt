@@ -66,9 +66,17 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                     connection.readTimeout = 20000
                     connection.setRequestProperty("Accept", "text/csv")
                     if (connection.responseCode !in 200..299) error("CSV unavailable")
-                    val raw = connection.inputStream.use { it.readNBytes(3_000_001) }
-                    require(raw.size < 3_000_001) { "State CSV too large" }
-                    raw
+                    val bytes = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    connection.inputStream.use { input ->
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            require(bytes.size() + n <= 3_000_000) { "State CSV too large" }
+                            bytes.write(buffer, 0, n)
+                        }
+                    }
+                    bytes.toByteArray()
                 } finally {
                     connection.disconnect()
                 }
