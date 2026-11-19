@@ -443,6 +443,7 @@ class MainActivity : Activity() {
     private lateinit var mapTiltBtn: Button
     private lateinit var mapToolsMenuBtn: Button
     private lateinit var mapToolsColumn: LinearLayout
+    private lateinit var mapToolsDock: LinearLayout
     private var mapToolsExpanded = false
     private lateinit var panelNightBtn: Button
     private lateinit var panelVoiceBtn: Button
@@ -1211,6 +1212,32 @@ class MainActivity : Activity() {
         musicDock.translationY = anchorY.coerceIn(0f, maxTop.toFloat())
     }
 
+    // Mesmo alinhamento vertical do player, mas do lado direito.
+    // Mudanças em busca, favoritos, sugestões e orientações movem os dois
+    // juntos, em vez de prender o menu no centro vertical do mapa.
+    private fun positionMapTools() {
+        if (!::mapToolsDock.isInitialized || !::searchInput.isInitialized) return
+        val parent = mapToolsDock.parent as? View ?: return
+        if (screenMode != 1 || parent.height <= 0) return
+
+        val searchBox = searchInput.parent as? View
+        val topColumn = searchBox?.parent as? View
+        val anchor = topColumn ?: searchBox ?: searchInput
+        if (anchor.height <= 0) return
+        val parentCoords = IntArray(2)
+        val anchorCoords = IntArray(2)
+        parent.getLocationOnScreen(parentCoords)
+        anchor.getLocationOnScreen(anchorCoords)
+        val idealTop = anchorCoords[1] - parentCoords[1] + anchor.height + px(12)
+
+        // Enquanto o menu estiver aberto, preservar o rodape de navegação.
+        val bottomReserved = px(166)
+        val menuHeight = mapToolsDock.height.takeIf { it > 0 }
+            ?: px(if (mapToolsExpanded) 365 else 52)
+        val maxTop = (parent.height - menuHeight - bottomReserved).coerceAtLeast(0)
+        mapToolsDock.translationY = idealTop.coerceIn(0, maxTop).toFloat()
+    }
+
     private fun updateMusicFabAppearance() {
         if (!::musicFab.isInitialized) return
         val size = if (screenMode == 0) 22 else 30
@@ -1550,7 +1577,7 @@ class MainActivity : Activity() {
             .bearing(bearing)
             // Camera de navegacao: moto mais baixa no mapa completo e
             // proxima ao rodape do minimapa, deixando a via adiante visivel.
-            .padding(0.0, viewHeight * (if (h.interactive) 0.56 else 0.67), 0.0, 0.0)
+            .padding(0.0, viewHeight * (if (h.interactive) 0.73 else 0.67), 0.0, 0.0)
             .build()
         if (animate) {
             m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 500)
@@ -1915,6 +1942,9 @@ class MainActivity : Activity() {
         if (mode == 0 || mode == 1) {
             updateMusicFabAppearance()
             musicDock.post { applyFabLayout() }
+            if (mode == 1 && ::mapToolsDock.isInitialized) {
+                mapToolsDock.post { positionMapTools() }
+            }
         }
         // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
         if (mode == 0 || mode == 1) {
@@ -2237,8 +2267,9 @@ class MainActivity : Activity() {
         cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
-        // Ao iniciar/cancelar rota o player muda de âncora, mas não pode flutuar com GPS.
+        // Ao mudar rota/instrução, os controles seguem a altura real do topo.
         musicDock.post { applyFabLayout() }
+        if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
     }
 
     // Traduz a manobra do OSRM para uma frase em português
@@ -2995,10 +3026,12 @@ class MainActivity : Activity() {
         // muda de altura: o player desce/sube sem sobrepor conteúdo.
         topCol.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             musicDock.post { applyFabLayout() }
+            if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
         }
         // O texto da instrução pode crescer de uma para duas linhas.
         instrCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             musicDock.post { applyFabLayout() }
+            if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
         }
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
@@ -3050,44 +3083,49 @@ class MainActivity : Activity() {
             mapToolsMenuBtn.text = if (mapToolsExpanded) "✕" else "☰"
             mapToolsMenuBtn.contentDescription =
                 if (mapToolsExpanded) "Fechar ferramentas do mapa" else "Abrir ferramentas do mapa"
+            mapToolsDock.post { positionMapTools() }
         }.apply {
             textSize = 25f
             contentDescription = if (mapToolsExpanded) "Fechar ferramentas do mapa"
                 else "Abrir ferramentas do mapa"
         }
-        val rightCol = LinearLayout(this).apply {
+        mapToolsDock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             addView(mapToolsMenuBtn, LinearLayout.LayoutParams(px(52), px(52)))
             addView(mapToolsColumn, LinearLayout.LayoutParams(WRAP, WRAP))
+            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                post { positionMapTools() }
+            }
         }
         frame.addView(
-            rightCol,
-            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            mapToolsDock,
+            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
                 rightMargin = px(12)
             }
         )
+        mapToolsDock.post { positionMapTools() }
 
-        // ----- Inferior: cancelar acima do GPS (esquerda), ETA fixo no centro,
-        // e retorno para tela inicial à direita. Espaçamento evita toques errados. -----
+        // ----- Rodape: voltar ACIMA da centralização, cancelar à direita;
+        // distância de 24dp e diálogo de confirmação contra toques acidentais. -----
         val gpsBtn = modernRecenterButton()
-        cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
-            background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
-            contentDescription = "Cancelar rota com confirmação"
+        val backBtn = floatBtn("⌂") { setScreen(0) }.apply {
+            contentDescription = "Voltar à tela inicial do velocímetro"
         }
         val leftControls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
-            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
                 bottomMargin = px(24)
             })
             addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
         }
-        val backBtn = floatBtn("⌂") { setScreen(0) }.apply {
-            contentDescription = "Voltar à tela inicial do velocímetro"
+        cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
+            background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
+            contentDescription = "Cancelar rota com confirmação"
         }
 
-        // Faixa de chegada entre os dois controles inferiores, sem seguir a moto.
+        // Faixa de tempo, distância e chegada permanece entre os controles.
         fullEtaCard = RouteEtaCard(this, accent)
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -3101,19 +3139,23 @@ class MainActivity : Activity() {
                 gravity = Gravity.BOTTOM
                 bottomMargin = px(5)
             })
-            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
                 gravity = Gravity.BOTTOM
                 bottomMargin = px(6)
             })
         }
-        val attrib = label(9f, cLabel, align = Gravity.CENTER).apply {
-            text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM · Alertas: Pardal (ODbL)"
+        // Créditos ficam junto à faixa de atribuição MapLibre, no rodapé,
+        // sem uma marca d'água flutuante acima da moto.
+        val attrib = label(9f, cLabel, align = Gravity.END).apply {
+            text = "© OpenStreetMap / OpenFreeMap · OSRM · Pardal (ODbL)"
+            maxLines = 1
+            setPadding(0, px(3), 0, 0)
         }
         val bottomCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(12), 0, px(12), px(12))
-            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = px(4) })
+            setPadding(px(12), 0, px(12), px(3))
             addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         frame.addView(bottomCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
 
