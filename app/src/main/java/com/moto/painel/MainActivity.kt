@@ -376,6 +376,11 @@ class MainActivity : Activity() {
     private lateinit var speedView: TextView
     private lateinit var unitView: TextView
     private lateinit var arcView: SpeedArcView
+    private lateinit var miniRoadLimitPlate: LinearLayout
+    private lateinit var miniRoadLimitIcon: ImageView
+    private lateinit var fullRoadLimitPlate: LinearLayout
+    private lateinit var fullRoadLimitIcon: ImageView
+    private var currentRoadLimit: Int? = null
     private lateinit var navView: TextView
     private lateinit var tripHeader: TextView
     private lateinit var distView: TextView
@@ -457,6 +462,54 @@ class MainActivity : Activity() {
     private fun refreshRoadAlerts() {
         val geo = roadAlerts.features()
         holders.forEach { h -> h.alertSrc?.setGeoJson(geo) }
+    }
+
+    // Limite da via vem de maxspeed do OpenStreetMap, NÃO do radar.
+    // Sem uma via confiável cadastrada, a plaquinha fica escondida.
+    private val roadSpeedSourceLazy = lazy {
+        RoadSpeedLimitSource(this) { kmh -> updateRoadLimit(kmh) }
+    }
+    private val roadSpeedSource: RoadSpeedLimitSource
+        get() = roadSpeedSourceLazy.value
+
+    private fun updateRoadLimit(kmh: Int?) {
+        currentRoadLimit = kmh
+        if (::miniRoadLimitPlate.isInitialized && ::fullRoadLimitPlate.isInitialized) {
+            val visible = if (kmh == null) View.GONE else View.VISIBLE
+            miniRoadLimitPlate.visibility = visible
+            fullRoadLimitPlate.visibility = visible
+            if (kmh != null) {
+                val plate = TrafficIcons.speedSign(kmh)
+                miniRoadLimitIcon.setImageBitmap(plate)
+                fullRoadLimitIcon.setImageBitmap(plate)
+            }
+        }
+    }
+
+    private fun roadLimitPlate(mini: Boolean): LinearLayout {
+        val icon = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            currentRoadLimit?.let { setImageBitmap(TrafficIcons.speedSign(it)) }
+        }
+        val plate = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = box(this@MainActivity, 0xDF0C1930.toInt(), 12)
+            setPadding(px(6), px(3), px(8), px(3))
+            addView(icon, LinearLayout.LayoutParams(px(42), px(42)))
+            addView(label(12f, Color.WHITE, bold = true).apply {
+                text = "VIA"
+            }, LinearLayout.LayoutParams(WRAP, WRAP).apply { leftMargin = px(2) })
+            visibility = if (currentRoadLimit == null) View.GONE else View.VISIBLE
+        }
+        if (mini) {
+            miniRoadLimitIcon = icon
+            miniRoadLimitPlate = plate
+        } else {
+            fullRoadLimitIcon = icon
+            fullRoadLimitPlate = plate
+        }
+        return plate
     }
     private var steps: List<Step> = emptyList()
     private var stepIndex = 0
@@ -562,6 +615,7 @@ class MainActivity : Activity() {
             updateStableHeading(loc)
             lastFix = loc
             roadAlerts.onLocation(loc)
+            roadSpeedSource.onLocation(loc)
 
             // Primeira localização: já posiciona o mapa
             if (!firstFixDone) {
@@ -761,6 +815,7 @@ class MainActivity : Activity() {
         controller?.unregisterCallback(mediaCallback)
         tts?.shutdown()
         roadAlerts.stop()
+        if (roadSpeedSourceLazy.isInitialized()) roadSpeedSource.close()
         destroyHolders()
         super.onDestroy()
     }
@@ -1212,6 +1267,10 @@ class MainActivity : Activity() {
         for (kind in listOf("radar", "lombada", "semaforo")) {
             s.addImage("ravo-alert-$kind", TrafficIcons.load(this, kind))
         }
+        // Sinais redondos com a velocidade do radar. Sem dado, sem plaquinha.
+        for (limit in 10..140 step 5) {
+            s.addImage("ravo-limit-" + limit, TrafficIcons.speedSign(limit))
+        }
 
         val rs = GeoJsonSource("route-src")
         val ds = GeoJsonSource("dest-src")
@@ -1304,6 +1363,24 @@ class MainActivity : Activity() {
                 )
             }
         }
+        // A placa numérica aparece AO LADO do ícone, nos dois mapas.
+        // É o limite fiscalizado pelo radar, independente do limite da via.
+        s.addLayer(
+            SymbolLayer("ravo-radar-speed-plate", "alerts-src").withFilter(
+                Expression.all(
+                    Expression.eq(Expression.get("type"), Expression.literal("radar")),
+                    Expression.has("speedSign")
+                )
+            ).withProperties(
+                PropertyFactory.iconImage(Expression.get("speedSign")),
+                PropertyFactory.iconSize(0.60f),
+                PropertyFactory.iconOffset(arrayOf(70f, 0f)),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true),
+                PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT)
+            )
+        )
         s.addLayer(
             CircleLayer("dest-layer", "dest-src").withProperties(
                 PropertyFactory.circleColor(accent),
@@ -2216,6 +2293,12 @@ class MainActivity : Activity() {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
+            // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
+            addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
+                Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(8)
+                    rightMargin = px(8)
+                })
         }
 
         // Linha de navegação: fica numa linha só e desliza se for longa
@@ -2456,6 +2539,12 @@ class MainActivity : Activity() {
         // Mapa ocupa 100% da área
         fullMap = newMap(true)
         frame.addView(fullMap, FrameLayout.LayoutParams(MATCH, MATCH))
+        // Limite da via em placa flutuante, longe da pesquisa e dos controles.
+        frame.addView(roadLimitPlate(false), FrameLayout.LayoutParams(WRAP, WRAP,
+            Gravity.BOTTOM or Gravity.START).apply {
+                leftMargin = px(16)
+                bottomMargin = px(106)
+            })
         offlineNotice = label(12f, Color.WHITE, bold = true).apply {
             text = "SEM INTERNET · mapa salvo / cache"
             setPadding(px(12), px(8), px(12), px(8))
