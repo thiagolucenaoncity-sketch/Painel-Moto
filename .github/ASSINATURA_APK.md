@@ -2,7 +2,27 @@
 
 As atualizações Android precisam usar o mesmo `applicationId`, um `versionCode` maior e **a mesma chave de assinatura**. O `assembleDebug` do GitHub Actions criava um certificado temporário em cada execução. Sem assinatura persistente, instalar o APK novo por cima do anterior pode falhar.
 
-## Configuração única (Windows, PowerShell)
+## Configuração mais fácil: 100% nuvem, sem instalar nada no Windows
+
+1. Abra este repositório no navegador, selecione a branch com a correção (ou `main` depois do merge do PR #4) e clique em **Code → Codespaces → Create codespace**.
+2. No editor do Codespaces, clique em **Terminal → New Terminal**.
+3. Execute **um único comando**, diretamente na máquina virtual do GitHub:
+
+   ```bash
+   bash scripts/configurar-assinatura-codespaces.sh
+   ```
+
+4. O script cria a chave PKCS12/JKS com senha aleatória forte, guarda os arquivos fora do repositório, verifica o acesso e usa `gh secret set` para enviar os quatro Secrets ao **GitHub Actions**. Ele não mostra a senha nem coloca a chave no código.
+5. Antes de apagar o Codespaces, **guarde backup privado** dos arquivos `~/.ravo-signing/ravo-release.jks` e `~/.ravo-signing/senha-ravo.txt` (por exemplo, baixando-os pelo explorador de arquivos do Codespaces e guardando em um cofre criptografado). Nunca compartilhe esses arquivos. O armazenamento do Codespaces **não é um backup permanente**.
+6. Após integrar o PR #4 à `main`, vá em **Actions → Build APK → Run workflow**, escolha `main` e baixe o APK com nome `RAVO_atualizavel_...`.
+
+Se `gh secret set` reclamar de autenticação/permissões, a conta do Codespaces precisa de autorização para modificar os Secrets do repositório. Nesse caso, interrompa o processo: o script **não** deve ser alterado para imprimir chaves ou senhas no terminal. Consulte o acesso do GitHub CLI e tente novamente. O script reutiliza a chave já criada no mesmo Codespaces, sem gerar outra a cada tentativa.
+
+A primeira migração do antigo APK debug ainda exige desinstalar uma vez. Depois, todas as versões assinadas com a mesma chave poderão atualizar por cima, desde que o `versionCode` aumente.
+
+---
+
+## Configuração alternativa (Windows, PowerShell)
 
 **Importante:** a chave privada é um documento essencial do aplicativo. Nunca adicione `.jks`, a senha ou a versão Base64 ao GitHub como arquivo público. Faça backup seguro da chave e das senhas.
 
