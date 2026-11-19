@@ -2423,7 +2423,7 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
         background = box(context, cCard, 14, cBorder)
-        setPadding(px(6), px(12), px(6), px(12))
+        setPadding(px(6), px(7), px(6), px(7))
         addView(label(11f, accent, bold = true, align = Gravity.CENTER).apply { text = title; letterSpacing = 0.07f })
         addView(value, LinearLayout.LayoutParams(MATCH, WRAP))
     }
@@ -2541,6 +2541,8 @@ class MainActivity : Activity() {
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
+            // O mapa ganha altura e a velocidade sobe para deixar a moto livre abaixo.
+            translationY = -pxF(if (landscape) 16f else 46f)
             addView(speedView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(unitView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
@@ -2676,10 +2678,10 @@ class MainActivity : Activity() {
             it.includeFontPadding = false
         }
         val tripRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(44), 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
-        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(36), px(44)).apply { setMargins(0, 0, px(2), 0) })
-        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(44), 1.25f).apply { setMargins(0, 0, px(2), 0) })
-        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(44), 1.15f).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, px(42), 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
+        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(36), px(42)).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, px(42), 1.25f).apply { setMargins(0, 0, px(2), 0) })
+        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, px(42), 1.15f).apply { setMargins(0, 0, px(2), 0) })
 
         // Player: capa, título e artista (fica dentro do painel flutuante)
         val card = LinearLayout(this).apply {
