@@ -150,7 +150,12 @@ class SettingsActivity : Activity() {
         add(col, cycler("Lombadas", arrayOf("Ligadas", "Desligadas"), "alert_bump"))
         add(col, cycler("Semáforos (ícone no mapa)", arrayOf("Ligados", "Desligados"), "alert_semaforo"))
         add(col, cycler("Bipes de aproximação", arrayOf("Ligados", "Desligados"), "alert_beep"))
-        add(col, note("Radares e lombadas de SP ficam no aparelho (Pardal / ODbL). Semáforos são importados do OpenStreetMap quando houver conexão e guardados em cache; sem conexão, só aparecem os já baixados. Semáforo é apenas visual: as cores do desenho NÃO indicam a fase real. Avisos por voz e bipes continuam para radares e lombadas. Bases podem estar incompletas."), 12)
+        val updatedAt = RadarDatabaseUpdater.lastUpdateMs(this)
+        val updatedLabel = if (updatedAt > 0L)
+            java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale("pt", "BR")).format(java.util.Date(updatedAt))
+        else "base incluída no APK"
+        add(col, note("Radares e lombadas de São Paulo são consultados diretamente no celular, mesmo sem internet. A base Pardal (ODbL) é verificada para atualização automática a cada 15 dias quando o app estiver aberto e conectado. Última atualização: $updatedLabel. Em caso de falha, os dados anteriores permanecem."), 12)
+        add(col, note("Semáforos: fonte separada do OpenStreetMap; são baixados por região quando há internet e ficam em cache. Não indicam o estado real das luzes. Avisos por voz e bipes permanecem para radares e lombadas. Os registros podem estar desatualizados."), 12)
     }
 
     private fun addAbertura(col: LinearLayout) {
