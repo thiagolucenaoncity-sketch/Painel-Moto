@@ -7,7 +7,10 @@ object Prefs {
     private const val FILE = "painel_prefs"
 
     val BG_NAMES = arrayOf("Grade azul", "Preto", "Azul degradê", "Roxo degradê")
-    val GAUGE_NAMES = arrayOf("Arco", "Digital")
+    val GAUGE_NAMES = arrayOf("Arco", "Digital", "Anel 360°", "Semicírculo", "Barra esportiva", "HUD digital")
+    val GAUGE_THICKNESS = intArrayOf(8, 12, 16, 20, 24)
+    val GAUGE_MAX_SPEED = intArrayOf(120, 160, 180, 200, 240, 280)
+    val MAP_OPACITY = intArrayOf(15, 25, 35, 50, 65, 80)
     val MARKER_NAMES = arrayOf("Seta Waze", "Carro", "Moto", "Ponto GPS", "Pino", "Esportiva", "Street", "Trail", "Scooter", "Custom", "Entrega")
     val UNIT_NAMES = arrayOf("km/h e km", "mph e milhas")
 
