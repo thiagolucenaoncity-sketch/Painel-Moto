@@ -475,7 +475,7 @@ class MainActivity : Activity() {
     private fun updateRoadLimit(kmh: Int?) {
         currentRoadLimit = kmh
         if (::miniRoadLimitPlate.isInitialized && ::fullRoadLimitPlate.isInitialized) {
-            val visible = if (kmh == null) View.GONE else View.VISIBLE
+            val visible = if (kmh == null || Prefs.getInt(this, "hide_road_speed_plate") != 0) View.GONE else View.VISIBLE
             miniRoadLimitPlate.visibility = visible
             fullRoadLimitPlate.visibility = visible
             if (kmh != null) {
@@ -500,7 +500,7 @@ class MainActivity : Activity() {
             addView(label(12f, Color.WHITE, bold = true).apply {
                 text = "VIA"
             }, LinearLayout.LayoutParams(WRAP, WRAP).apply { leftMargin = px(2) })
-            visibility = if (currentRoadLimit == null) View.GONE else View.VISIBLE
+            visibility = if (currentRoadLimit == null || Prefs.getInt(this@MainActivity, "hide_road_speed_plate") != 0) View.GONE else View.VISIBLE
         }
         if (mini) {
             miniRoadLimitIcon = icon
@@ -615,7 +615,11 @@ class MainActivity : Activity() {
             updateStableHeading(loc)
             lastFix = loc
             roadAlerts.onLocation(loc)
-            roadSpeedSource.onLocation(loc)
+            if (Prefs.getInt(this@MainActivity, "hide_road_speed_plate") == 0) {
+                roadSpeedSource.onLocation(loc)
+            } else if (currentRoadLimit != null) {
+                updateRoadLimit(null)
+            }
 
             // Primeira localização: já posiciona o mapa
             if (!firstFixDone) {
