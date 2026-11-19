@@ -6,6 +6,10 @@ on:
     branches: [main]
     paths:
       - scripts/generate_sp_traffic_signals.py
+      - scripts/fuse_sp_traffic_signals.py
+      - scripts/import_geosampa_signals.py
+      - tests/test_fuse_traffic_signals.py
+      - data/traffic_sources/**
       - .github/workflows/update-sp-semaforos.yml
   schedule:
     # Aproximadamente quinzenal, nos dias 1 e 16 de cada mês (UTC).
@@ -32,15 +36,19 @@ jobs:
           python-version: '3.11'
       - name: Instalar leitor OSM PBF
         run: python -m pip install --disable-pip-version-check osmium
-      - name: Consultar semaforos estaduais no OSM e validar CSV
+      - name: Testar algoritmo de fusao de dados
+        run: python -m unittest discover -s tests -p 'test_fuse_traffic_signals.py' -v
+      - name: Importar GeoSampa como segunda fonte independente se disponivel
+        run: python scripts/import_geosampa_signals.py
+      - name: Consultar estado e consolidar dados reais
         run: python scripts/generate_sp_traffic_signals.py
       - name: Salvar a base estadual no GitHub
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/assets/roadalerts/sp_semaforos.csv
+          git add app/src/main/assets/roadalerts/sp_semaforos.csv data/traffic_quality/sp_semaforos_report.json
           if ! git diff --cached --quiet; then
-            git commit -m "data: atualizar semaforos SP offline (OSM)"
+            git commit -m "data: consolidar semaforos SP offline e auditoria de fontes"
             git push origin HEAD:main
           else
             echo "Base sem alteracoes"
