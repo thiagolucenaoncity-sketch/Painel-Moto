@@ -1210,7 +1210,7 @@ class MainActivity : Activity() {
         s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
         // Ícones próprios; registrados novamente a cada troca de estilo claro/escuro.
         for (kind in listOf("radar", "lombada", "semaforo")) {
-            s.addImage("ravo-alert-$kind", TrafficIcons.draw(kind))
+            s.addImage("ravo-alert-$kind", TrafficIcons.load(this, kind))
         }
 
         val rs = GeoJsonSource("route-src")
