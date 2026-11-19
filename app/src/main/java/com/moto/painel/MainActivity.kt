@@ -271,6 +271,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var isConnected: Boolean? = null
     private var offlineNotice: TextView? = null
+    private var lastRoadDataCheckMs = 0L
     private fun online(): Boolean {
         val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = manager.activeNetwork ?: return false
@@ -278,6 +279,14 @@ class MainActivity : Activity() {
     }
     private fun updateConnection() {
         val now = online()
+        val previousState = isConnected
+        val currentTime = System.currentTimeMillis()
+        // Somente a cada 15 dias a base de SP vai à internet; a verificação
+        // deste prazo é barata e roda a cada 15 min, ou ao reconectar.
+        if (now && (previousState != true || currentTime - lastRoadDataCheckMs > 15L * 60L * 1000L)) {
+            lastRoadDataCheckMs = currentTime
+            RadarDatabaseUpdater.checkWhenDue(this, true) { roadAlerts.databaseUpdated() }
+        }
         if (now == isConnected) return
         val previously = isConnected
         isConnected = now
