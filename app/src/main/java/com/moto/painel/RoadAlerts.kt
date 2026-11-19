@@ -192,7 +192,8 @@ class RoadAlerts(
             // A placa ao lado do radar só aparece quando a base conhece o limite.
             // Sem valor cadastrado, não inventa velocidade.
             val knownLimit = if (it.type == "radar") it.limit.toIntOrNull() else null
-            if (knownLimit != null && knownLimit in 10..140 && knownLimit % 5 == 0) {
+            if (Prefs.getInt(context, "hide_radar_speed_plate") == 0 &&
+                knownLimit != null && knownLimit in 10..140 && knownLimit % 5 == 0) {
                 addStringProperty("speedSign", "ravo-limit-" + knownLimit)
             }
         }
