@@ -42,6 +42,11 @@ class RoadAlerts(
     private var activeRoute: List<LatLng> = emptyList()
     private var userPosition: Location? = null
     private var priorities: Map<String, String> = emptyMap()
+    private var routeProgressByHazard: Map<String, Double> = emptyMap()
+    private var classificationRevision = 0
+    private var lastUserProgressAt = 0L
+    private var userRouteProgress = 0.0
+    private var lastProgressPosition: Location? = null
     private val trafficSignalsLazy = lazy {
         TrafficSignalSource(context) { refreshTrafficSignals() }
     }
@@ -56,8 +61,7 @@ class RoadAlerts(
     private fun refreshTrafficSignals() {
         val c = center ?: return
         hazards = hazards.filter { it.type != "semaforo" } + signalHazards(c.latitude, c.longitude)
-        priorities = emptyMap()
-        updatePriorities()
+        classifyRouteInBackground()
         redraw()
     }
 
@@ -91,24 +95,63 @@ class RoadAlerts(
 
     fun setRoute(points: List<LatLng>) {
         activeRoute = points.toList()
-        updatePriorities()
+        lastUserProgressAt = 0L
+        classifyRouteInBackground()
+    }
+
+    /**
+     * A projeção de CADA alerta na rota é custosa (N pontos x M trechos).
+     * Calcula apenas quando muda a rota ou a lista de alertas, fora da UI.
+     * A cada GPS, consulta somente o progresso já calculado.
+     */
+    private fun classifyRouteInBackground() {
+        val revision = ++classificationRevision
+        val route = activeRoute.toList()
+        val snapshot = hazards.toList()
+        routeProgressByHazard = emptyMap()
+        if (route.size < 2 || snapshot.isEmpty()) {
+            updatePriorities()
+            return
+        }
+        Thread {
+            val classified = HashMap<String, Double>()
+            for (hazard in snapshot) {
+                val match = project(hazard.lat, hazard.lon, route) ?: continue
+                if (match.first <= 28.0) classified[hazard.id] = match.second
+            }
+            handler.post {
+                if (!active || revision != classificationRevision) return@post
+                routeProgressByHazard = classified
+                lastUserProgressAt = 0L
+                updatePriorities()
+            }
+        }.start()
     }
 
     private fun updatePriorities() {
-        val path = activeRoute
+        val now = System.currentTimeMillis()
         val me = userPosition
-        val currentProgress = if (me != null && path.size > 1) project(me.latitude, me.longitude, path)?.second else null
-        val next = if (currentProgress != null) hazards.filter { enabled(it) && it.type != "semaforo" }.mapNotNull { h ->
-            val match = project(h.lat, h.lon, path) ?: return@mapNotNull null
-            // Somente pontos próximos ao traçado e à frente, evitando retorno pela mesma via.
-            if (match.first > 28.0 || match.second < currentProgress + 8.0) null
-            else h.id to (match.second - currentProgress)
-        }.minByOrNull { it.second }?.first else null
-        val updated = hazards.associate { h ->
-            val nearRoute = path.size > 1 && (project(h.lat, h.lon, path)?.first ?: Double.MAX_VALUE) <= 28.0
-            h.id to when {
-                h.id == next -> "next"
-                nearRoute -> "route"
+        if (activeRoute.size > 1 && me != null &&
+            (lastUserProgressAt == 0L || now - lastUserProgressAt > 2600L ||
+             (lastProgressPosition?.distanceTo(me) ?: Float.MAX_VALUE) > 18f)
+        ) {
+            userRouteProgress = project(me.latitude, me.longitude, activeRoute)?.second ?: 0.0
+            lastUserProgressAt = now
+            lastProgressPosition = Location(me)
+        }
+        // Não é necessário recalcular a geometria da rota para cada ponto a cada segundo.
+        val nextId = if (activeRoute.size > 1 && me != null) {
+            routeProgressByHazard.entries.asSequence()
+                .filter { (id, progress) ->
+                    progress > userRouteProgress + 8.0 &&
+                    hazards.any { it.id == id && it.type != "semaforo" && enabled(it) }
+                }
+                .minByOrNull { it.value }?.key
+        } else null
+        val updated = hazards.associate { hazard ->
+            hazard.id to when {
+                hazard.id == nextId -> "next"
+                routeProgressByHazard.containsKey(hazard.id) -> "route"
                 else -> "other"
             }
         }
@@ -159,10 +202,17 @@ class RoadAlerts(
         val prev = previous
         previous = Location(loc)
         if (loc.hasSpeed() && loc.speed < 1.5f) return
-        val candidates = hazards.filter { enabled(it) && it.type != "semaforo" }.map { h ->
-            val p = Location("osm").apply { latitude = h.lat; longitude = h.lon }
-            h to loc.distanceTo(p).toDouble()
-        }.filter { (h, d) ->
+        val latWindow = 470.0 / 111320.0
+        val lonWindow = latWindow / cos(Math.toRadians(loc.latitude)).coerceAtLeast(0.2)
+        val candidates = hazards.asSequence()
+            .filter { h ->
+                enabled(h) && h.type != "semaforo" &&
+                    abs(h.lat - loc.latitude) <= latWindow &&
+                    abs(h.lon - loc.longitude) <= lonWindow
+            }.map { h ->
+                val p = Location("road-hazard").apply { latitude = h.lat; longitude = h.lon }
+                h to loc.distanceTo(p).toDouble()
+            }.filter { (h, d) ->
             if (d > 450 || d < 5) return@filter false
             if (prev != null) {
                 val p = Location("osm").apply { latitude = h.lat; longitude = h.lon }
@@ -250,8 +300,7 @@ class RoadAlerts(
                     center = Location(loc)
                     lastFailure = false
                     warned.clear()
-                    priorities = emptyMap()
-                    updatePriorities()
+                    classifyRouteInBackground()
                     redraw()
                     if (Prefs.getInt(context, "alert_semaforo") == 0) trafficSignals.fetchAt(lat, lon)
                     if (near.isEmpty()) {
