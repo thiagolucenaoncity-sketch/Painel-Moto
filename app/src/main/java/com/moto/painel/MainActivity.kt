@@ -1818,6 +1818,8 @@ class MainActivity : Activity() {
                 showInstruction(next.text, "")
                 say(next.text)
             } else {
+                // A rota pode continuar desenhada, mas avisos de radar param ao chegar.
+                roadAlerts.stopNavigation()
                 showInstruction("Você chegou ao destino", "")
                 say("Você chegou ao destino")
             }
@@ -1950,7 +1952,7 @@ class MainActivity : Activity() {
         stepIndex = if (list.size > 1) 1 else 0
 
         holders.forEach { refreshRoute(it) }
-        roadAlerts.setRoute(points)
+        roadAlerts.setRoute(if (list.isNotEmpty()) points else emptyList())
 
         // Na primeira rota, mostra o trajeto inteiro no mapa grande (para de seguir até tocar em ◎)
         if (!isRecalc) {

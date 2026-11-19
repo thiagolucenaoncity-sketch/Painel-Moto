@@ -41,6 +41,8 @@ class RoadAlerts(
     private var lastBeep = 0L
     private var active = true
     private var activeRoute: List<LatLng> = emptyList()
+    // Apenas uma navegação realmente em andamento pode emitir sons de radar.
+    private var navigationActive = false
     private var userPosition: Location? = null
     private var priorities: Map<String, String> = emptyMap()
     private var routeProgressByHazard: Map<String, Double> = emptyMap()
@@ -96,8 +98,19 @@ class RoadAlerts(
 
     fun setRoute(points: List<LatLng>) {
         activeRoute = points.toList()
+        navigationActive = activeRoute.size > 1
+        previous = null
+        tone.stopTone()
+        lastBeep = 0L
         lastUserProgressAt = 0L
+        if (!navigationActive) warned.clear()
         classifyRouteInBackground()
+    }
+
+    // Ao chegar, a rota pode continuar desenhada, mas nenhum radar deve apitar.
+    fun stopNavigation() {
+        navigationActive = false
+        tone.stopTone()
     }
 
     /**
@@ -208,8 +221,10 @@ class RoadAlerts(
         val now = System.currentTimeMillis()
         userPosition = Location(loc)
         if (activeRoute.size > 1 && hazards.isNotEmpty()) updatePriorities()
-        // A consulta não depende da precisão: apenas os avisos sonoros precisam de GPS preciso.
+        // Mantém todos os ícones no mapa, com ou sem navegação.
         fetchAt(loc.latitude, loc.longitude)
+        // Bipes e voz de alertas: somente radares que estão adiante na rota ativa.
+        if (!navigationActive || activeRoute.size < 2) return
         if (!loc.hasAccuracy() || loc.accuracy > 65f) return
         val prev = previous
         previous = Location(loc)
@@ -218,7 +233,13 @@ class RoadAlerts(
         val lonWindow = latWindow / cos(Math.toRadians(loc.latitude)).coerceAtLeast(0.2)
         val candidates = hazards.asSequence()
             .filter { h ->
-                enabled(h) && h.type != "semaforo" &&
+                enabled(h) && RadarSoundPolicy.shouldNotify(
+                    kind = h.type,
+                    navigating = navigationActive,
+                    routePointCount = activeRoute.size,
+                    hazardProgress = routeProgressByHazard[h.id],
+                    userProgress = userRouteProgress
+                ) &&
                     abs(h.lat - loc.latitude) <= latWindow &&
                     abs(h.lon - loc.longitude) <= lonWindow
             }.map { h ->
@@ -245,8 +266,7 @@ class RoadAlerts(
         val closest = candidates.firstOrNull() ?: return
         val (h, d) = closest
         if (d < 350 && warned.add(h.id)) {
-            val kind = if (h.type == "radar") "radar" else "lombada"
-            announce("Atenção, $kind a aproximadamente ${d.toInt()} metros" + if (h.limit.isNotEmpty()) ", limite de ${h.limit} quilômetros por hora" else "")
+            announce("Atenção, radar a aproximadamente ${d.toInt()} metros" + if (h.limit.isNotEmpty()) ", limite de ${h.limit} quilômetros por hora" else "")
         }
         // Bipes mais rápidos à medida que a distância diminui, como sensor de estacionamento.
         if (Prefs.getInt(context, "alert_beep") == 0 && d < 150) {
