@@ -2832,7 +2832,7 @@ class MainActivity : Activity() {
         frame.addView(roadLimitPlate(false), FrameLayout.LayoutParams(WRAP, WRAP,
             Gravity.BOTTOM or Gravity.START).apply {
                 leftMargin = px(16)
-                bottomMargin = px(106)
+                bottomMargin = px(195)
             })
         offlineNotice = label(12f, Color.WHITE, bold = true).apply {
             text = "SEM INTERNET · mapa salvo / cache"
@@ -2998,19 +2998,43 @@ class MainActivity : Activity() {
             }
         )
 
-        // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
-        // Botao centralizador mais moderno, com icone vetorial e contorno colorido.
+        // ----- Inferior: cancelar acima do GPS (esquerda), ETA fixo no centro,
+        // e retorno para tela inicial à direita. Espaçamento evita toques errados. -----
         val gpsBtn = modernRecenterButton()
-        cancelBtn = floatBtn("✕") { clearRoute() }
-        val backBtn = floatBtn("⌂") { setScreen(0) }
+        cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
+            background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
+            contentDescription = "Cancelar rota com confirmação"
+        }
+        val leftControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                bottomMargin = px(24)
+            })
+            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
+        }
+        val backBtn = floatBtn("⌂") { setScreen(0) }.apply {
+            contentDescription = "Voltar à tela inicial do velocímetro"
+        }
+
+        // Faixa de chegada entre os dois controles inferiores, sem seguir a moto.
+        fullEtaCard = RouteEtaCard(this, accent)
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)))
+            gravity = Gravity.BOTTOM
+            addView(leftControls, LinearLayout.LayoutParams(px(62), WRAP).apply {
+                gravity = Gravity.BOTTOM
+            })
+            addView(fullEtaCard, LinearLayout.LayoutParams(0, WRAP, 1f).apply {
+                leftMargin = px(8)
+                rightMargin = px(8)
+                gravity = Gravity.BOTTOM
+                bottomMargin = px(5)
+            })
+            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                gravity = Gravity.BOTTOM
+                bottomMargin = px(6)
+            })
         }
         val attrib = label(9f, cLabel, align = Gravity.CENTER).apply {
             text = "Mapa © OpenStreetMap / OpenFreeMap · Rota OSRM · Alertas: Pardal (ODbL)"
@@ -3022,15 +3046,6 @@ class MainActivity : Activity() {
             addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         frame.addView(bottomCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
-
-        // Sobreposto ao mapa, acompanha a posicao da moto em vez de ficar preso
-        // a um canto. Fundo translucido e contraste para leitura ao pilotar.
-        fullEtaCard = RouteEtaCard(this, accent)
-        frame.addView(fullEtaCard, FrameLayout.LayoutParams(px(238), WRAP,
-            Gravity.TOP or Gravity.START))
-        fullEtaCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            positionFullEtaCard()
-        }
 
         refreshFavChips()
         refreshMapButtons()
