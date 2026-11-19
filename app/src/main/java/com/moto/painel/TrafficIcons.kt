@@ -49,6 +49,40 @@ object TrafficIcons {
         bitmap
     }
 
+    // Placa de velocidade no padrão visual das placas circulares de trânsito.
+    // A mesma arte é usada no radar e no indicador de limite da via.
+    private val speedSignCache = mutableMapOf<Int, Bitmap>()
+
+    fun speedSign(kmh: Int): Bitmap = synchronized(speedSignCache) {
+        speedSignCache[kmh]?.let { return@synchronized it }
+        val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        paint.color = 0x99000000.toInt()
+        canvas.drawCircle(49f, 51f, 43f, paint)
+        paint.color = Color.WHITE
+        canvas.drawCircle(47f, 47f, 43f, paint)
+        paint.color = 0xFFDE2F36.toInt()
+        canvas.drawCircle(47f, 47f, 42f, paint)
+        paint.color = Color.WHITE
+        canvas.drawCircle(47f, 47f, 33.5f, paint)
+        paint.color = 0xFF1C2430.toInt()
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.25f
+        canvas.drawCircle(47f, 47f, 33.5f, paint)
+        paint.style = Paint.Style.FILL
+        paint.typeface = android.graphics.Typeface.create(
+            android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD
+        )
+        paint.textAlign = Paint.Align.CENTER
+        paint.textSize = if (kmh >= 100) 32f else 39f
+        val text = kmh.toString()
+        val baseline = 47f - (paint.ascent() + paint.descent()) / 2f
+        canvas.drawText(text, 47f, baseline, paint)
+        speedSignCache[kmh] = bitmap
+        bitmap
+    }
+
     fun draw(type: String): Bitmap {
         val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
