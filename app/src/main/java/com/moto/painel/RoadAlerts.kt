@@ -140,11 +140,13 @@ class RoadAlerts(
             lastProgressPosition = Location(me)
         }
         // Não é necessário recalcular a geometria da rota para cada ponto a cada segundo.
+        val eligibleIds = hazards.asSequence()
+            .filter { it.type != "semaforo" && enabled(it) }
+            .map { it.id }.toHashSet()
         val nextId = if (activeRoute.size > 1 && me != null) {
             routeProgressByHazard.entries.asSequence()
                 .filter { (id, progress) ->
-                    progress > userRouteProgress + 8.0 &&
-                    hazards.any { it.id == id && it.type != "semaforo" && enabled(it) }
+                    progress > userRouteProgress + 8.0 && id in eligibleIds
                 }
                 .minByOrNull { it.value }?.key
         } else null
