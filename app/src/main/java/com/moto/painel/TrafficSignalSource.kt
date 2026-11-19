@@ -10,6 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import kotlin.math.cos
+import kotlin.math.floor
 
 /**
  * Semáforos mapeados como highway=traffic_signals no OpenStreetMap.
@@ -21,6 +22,21 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
     private val handler = Handler(Looper.getMainLooper())
     private val file = File(context.filesDir, "ravo_traffic_signals_sp.csv")
     private val points = LinkedHashMap<String, Signal>()
+    // Grade espacial (~1 km/célula) evita percorrer 16 mil pontos em cada consulta.
+    private val grid = HashMap<Long, MutableList<Signal>>()
+    private fun gridCoord(value: Double): Int = floor(value * 100.0).toInt()
+    private fun gridKey(lat: Int, lon: Int): Long =
+        (lat.toLong() shl 32) or (lon.toLong() and 0xFFFFFFFFL)
+
+    private fun rebuildIndex() {
+        grid.clear()
+        points.values.forEach { signal ->
+            grid.getOrPut(gridKey(gridCoord(signal.lat), gridCoord(signal.lon))) {
+                ArrayList()
+            }.add(signal)
+        }
+    }
+
     private var fetching = false
     private var lastFetchMs = 0L
     private var lastFetchSucceeded = false
@@ -40,7 +56,8 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                 if (p.size < 3) return@forEach
                 val lat = p[1].toDoubleOrNull() ?: return@forEach
                 val lon = p[2].toDoubleOrNull() ?: return@forEach
-                if (p[0].startsWith("osm:") && lat in -25.6..-19.5 && lon in -53.3..-43.5) {
+                if ((p[0].startsWith("osm:") || p[0].startsWith("ravo:")) &&
+                    lat in -25.6..-19.5 && lon in -53.3..-43.5) {
                     loaded[p[0]] = Signal(p[0], lat, lon)
                 }
             }
@@ -102,6 +119,7 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                     if (!active) return@post
                     points.clear()
                     points.putAll(updated)
+                    rebuildIndex()
                     statewideData = true
                     changed()
                 }
@@ -129,17 +147,26 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
             else -> stored
         }
         points.putAll(selected)
+        rebuildIndex()
         statewideData = selected.size >= 5000
     }
 
     fun close() { active = false }
     fun nearby(lat: Double, lon: Double, radius: Double = 5500.0): List<Signal> {
-        val cosLat = cos(Math.toRadians(lat))
-        return points.values.filter { s ->
-            val a = (s.lat - lat) * 111320.0
-            val b = (s.lon - lon) * 111320.0 * cosLat
-            a * a + b * b <= radius * radius
+        val cosLat = cos(Math.toRadians(lat)).coerceAtLeast(0.15)
+        val latRadius = radius / 111320.0
+        val lonRadius = radius / (111320.0 * cosLat)
+        val nearby = ArrayList<Signal>()
+        for (y in gridCoord(lat - latRadius)..gridCoord(lat + latRadius)) {
+            for (x in gridCoord(lon - lonRadius)..gridCoord(lon + lonRadius)) {
+                for (point in grid[gridKey(y, x)].orEmpty()) {
+                    val a = (point.lat - lat) * 111320.0
+                    val b = (point.lon - lon) * 111320.0 * cosLat
+                    if (a * a + b * b <= radius * radius) nearby.add(point)
+                }
+            }
         }
+        return nearby
     }
 
     fun fetchAt(lat: Double, lon: Double) {
@@ -204,6 +231,7 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                             if (points.put(signal.id, signal) == null) added++
                         }
                         if (added > 0) {
+                            rebuildIndex()
                             changed()
                             Thread {
                                 try {
