@@ -1972,6 +1972,9 @@ class MainActivity : Activity() {
         panelEtaCard.render(arrival, durationText, distanceText)
         fullEtaCard.render(arrival, durationText, distanceText)
         panelEtaCard.visibility = View.VISIBLE
+        // INVISIBLE participa do layout: o mapa precisa medir o cartão antes
+        // de posicioná-lo abaixo da motinho. GONE deixaria largura/altura zero.
+        if (fullEtaCard.visibility == View.GONE) fullEtaCard.visibility = View.INVISIBLE
         if (screenMode == 1) fullEtaCard.post { positionFullEtaCard() }
     }
 
