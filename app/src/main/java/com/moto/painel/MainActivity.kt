@@ -1142,54 +1142,61 @@ class MainActivity : Activity() {
 
     // ---------- Player de música: botão fixo em cada tela ----------
     //
-    // Coordenadas relativas à raiz da Activity, não à posição geográfica da
-    // câmera. Isso impede que a navegação/zoom ou a troca 2D/3D mova o botão.
-    // Na tela inicial fica na mesma linha do nome/modelo, mas fora do minimapa.
-    // No mapa completo fica abaixo da busca; com rota ativa, abaixo da instrução.
+    // O botao fica separado do mapa, fixo à interface da tela.
+    // As camadas abertas (favoritos, sugestões e instruções) determinam
+    // a altura da âncora, sem acompanhar zoom, GPS ou rotação do mapa.
     private fun applyFabLayout() {
         if (!::musicDock.isInitialized || !::musicFab.isInitialized) return
         val parent = musicDock.parent as? View ?: return
         if (parent.width <= 0 || parent.height <= 0) return
 
-        val buttonSize = px(56)
+        val buttonSize = px(if (screenMode == 0) 46 else 56)
         val popupWidth = px(280).coerceAtMost((parent.width - px(32)).coerceAtLeast(px(160)))
+        val fabLp = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
+            gravity = Gravity.START
+        }
         val popupLp = LinearLayout.LayoutParams(popupWidth, WRAP).apply {
             gravity = Gravity.START
             topMargin = px(8)
         }
-        val fabLp = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
-            gravity = Gravity.START
-        }
-        // Sempre abaixo do botão, para não cobrir o nome da moto nem a busca.
         if (musicDock.childCount != 2 ||
             musicDock.getChildAt(0) !== musicFab ||
             musicDock.getChildAt(1) !== musicPopup) {
             musicDock.removeAllViews()
             musicDock.addView(musicFab, fabLp)
             musicDock.addView(musicPopup, popupLp)
-        }
-
-        val parentLocation = IntArray(2)
-        parent.getLocationOnScreen(parentLocation)
-        val anchorY: Float = if (screenMode == 0 && ::vehicleView.isInitialized) {
-            val vehicleLocation = IntArray(2)
-            vehicleView.getLocationOnScreen(vehicleLocation)
-            // Centraliza na altura da linha de dados da moto.
-            val vehicleHeight = vehicleView.height.takeIf { it > 0 } ?: px(54)
-            (vehicleLocation[1] - parentLocation[1] + vehicleHeight / 2f -
-                buttonSize / 2f)
-        } else if (screenMode == 1 && ::searchInput.isInitialized &&
-            ::instrCard.isInitialized) {
-            val anchor = if (hasRoute() && instrCard.visibility == View.VISIBLE)
-                instrCard else searchInput.parent as View
-            val anchorLocation = IntArray(2)
-            anchor.getLocationOnScreen(anchorLocation)
-            (anchorLocation[1] - parentLocation[1] + anchor.height + px(12)).toFloat()
         } else {
-            px(80).toFloat()
+            if (musicFab.layoutParams.width != buttonSize) {
+                musicDock.updateViewLayout(musicFab, fabLp)
+            }
+            if (musicPopup.layoutParams.width != popupWidth) {
+                musicDock.updateViewLayout(musicPopup, popupLp)
+            }
         }
 
-        val left = if (screenMode == 0) px(16) else px(24)
+        val parentCoords = IntArray(2)
+        parent.getLocationOnScreen(parentCoords)
+
+        val anchorY = if (screenMode == 0 && ::vehicleView.isInitialized) {
+            // Na mesma linha do apelido/modelo da moto, FORA do minimapa.
+            val vehicleCoords = IntArray(2)
+            vehicleView.getLocationOnScreen(vehicleCoords)
+            val vehicleHeight = vehicleView.height.takeIf { it > 0 } ?: px(46)
+            (vehicleCoords[1] - parentCoords[1] + vehicleHeight / 2f -
+                buttonSize / 2f)
+        } else if (screenMode == 1 && ::searchInput.isInitialized) {
+            // O container superior só ocupa a altura das linhas visíveis:
+            // buscar -> favoritos -> orientações (ou sugestões abertas).
+            // A âncora acompanha automaticamente o ÚLTIMO bloco visível.
+            val searchBox = searchInput.parent as? View
+            val topColumn = searchBox?.parent as? View
+            val anchor = topColumn ?: searchBox ?: searchInput
+            val coords = IntArray(2)
+            anchor.getLocationOnScreen(coords)
+            (coords[1] - parentCoords[1] + anchor.height + px(12)).toFloat()
+        } else px(80).toFloat()
+
+        val left = px(if (screenMode == 0) 16 else 24)
         val maxLeft = (parent.width - if (musicOpen) popupWidth else buttonSize)
             .coerceAtLeast(px(8))
         val contentHeight = buttonSize + if (musicOpen) {
@@ -1200,15 +1207,27 @@ class MainActivity : Activity() {
         musicDock.translationY = anchorY.coerceIn(0f, maxTop.toFloat())
     }
 
+    private fun updateMusicFabAppearance() {
+        if (!::musicFab.isInitialized) return
+        val size = if (screenMode == 0) 24 else 30
+        val drawable = getDrawable(
+            if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_moderno
+        )?.mutate()
+        drawable?.setBounds(0, 0, px(size), px(size))
+        // O PNG conserva suas cores e transparência; não aplicar tint.
+        musicFab.text = ""
+        musicFab.setCompoundDrawables(null, null, null, null)
+        musicFab.foregroundGravity = Gravity.CENTER
+        musicFab.foreground = drawable
+        musicFab.background = box(this, accent, if (screenMode == 0) 23 else 28, 0x77FFFFFF)
+        musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
+            else "Abrir player de áudio"
+    }
+
     private fun toggleMusic() {
         musicOpen = !musicOpen
         musicPopup.visibility = if (musicOpen) View.VISIBLE else View.GONE
-        musicFab.panelIcon(
-            if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_music,
-            Color.WHITE, 27
-        )
-        musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
-            else "Abrir player de áudio"
+        updateMusicFabAppearance()
         musicDock.post { applyFabLayout() }
     }
 
@@ -1887,7 +1906,10 @@ class MainActivity : Activity() {
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
         musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
-        if (mode == 0 || mode == 1) musicDock.post { applyFabLayout() }
+        if (mode == 0 || mode == 1) {
+            updateMusicFabAppearance()
+            musicDock.post { applyFabLayout() }
+        }
         // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
         if (mode == 0 || mode == 1) {
             (mapFix ?: lastFix)?.let { loc ->
@@ -2674,14 +2696,9 @@ class MainActivity : Activity() {
             musicDock.post { applyFabLayout() }
         }
 
-        // Botão do player com ícone vetorial premium (nota musical sobre disco).
-        // Não é arrastável: âncora depende somente da tela e da rota.
+        // PNG original (fones + equalizador), sem emoji e sem arrastar.
         musicFab = Button(this).apply {
             text = ""
-            panelIcon(
-                if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_music,
-                Color.WHITE, 27
-            )
             contentDescription = if (musicOpen) "Fechar player de áudio"
                 else "Abrir player de áudio"
             isAllCaps = false
@@ -2693,12 +2710,16 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, 0)
             setOnClickListener { toggleMusic() }
         }
+        updateMusicFabAppearance()
 
         musicDock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.START
         }
-        musicDock.addView(musicFab, LinearLayout.LayoutParams(px(56), px(56)))
+        musicDock.addView(musicFab, LinearLayout.LayoutParams(
+            px(if (screenMode == 0) 46 else 56),
+            px(if (screenMode == 0) 46 else 56)
+        ))
         musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP).apply {
             topMargin = px(8)
         })
@@ -2904,6 +2925,11 @@ class MainActivity : Activity() {
             addView(instrCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
         }
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+        // Ao abrir/fechar favoritos, sugestões ou orientação, o bloco superior
+        // muda de altura: o player desce/sube sem sobrepor conteúdo.
+        topCol.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            musicDock.post { applyFabLayout() }
+        }
         // O texto da instrução pode crescer de uma para duas linhas.
         instrCard.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             musicDock.post { applyFabLayout() }
