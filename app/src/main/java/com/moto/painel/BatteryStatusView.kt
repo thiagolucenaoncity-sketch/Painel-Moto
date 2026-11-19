@@ -1,13 +1,12 @@
 package com.moto.painel
 
-import android.animation.ValueAnimator
+import android.os.SystemClock
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
-import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -54,12 +53,19 @@ internal class BatteryStatusView(context: Context, labelColor: Int) : LinearLayo
     private var charging = false
     private val regularColor = labelColor
 
-    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 1200L
-        repeatCount = ValueAnimator.INFINITE
-        repeatMode = ValueAnimator.RESTART
-        interpolator = LinearInterpolator()
-        addUpdateListener { redraw(it.animatedValue as Float) }
+    // Independente da escala de animacoes do Android (que pode estar zerada).
+    // Manter o raio animado mesmo com o celular conectado e carga estavel.
+    private var animationStartedAt = 0L
+    private val frameTick = object : Runnable {
+        override fun run() {
+            if (isAttachedToWindow) {
+                if (charging || BatteryUiPolicy.isCritical(percentage)) {
+                    val elapsed = SystemClock.uptimeMillis() - animationStartedAt
+                    redraw((elapsed % 1400L) / 1400f)
+                }
+                postDelayed(this, if (charging || BatteryUiPolicy.isCritical(percentage)) 80L else 450L)
+            }
+        }
     }
 
     init {
@@ -96,6 +102,10 @@ internal class BatteryStatusView(context: Context, labelColor: Int) : LinearLayo
         contentDescription = "Bateria $newValue por cento" +
             (if (critical) ", bateria fraca" else "") +
             (if (charging) ", carregando" else ", nao carregando")
+        if (isAttachedToWindow) {
+            // Toda conexão/desconexão reinicia o ciclo de preenchimento.
+            animationStartedAt = SystemClock.uptimeMillis()
+        }
         redraw(0f)
     }
 
@@ -125,24 +135,31 @@ internal class BatteryStatusView(context: Context, labelColor: Int) : LinearLayo
                 // Progresso animado na imagem PNG, sem alterar o percentual real.
                 frameImage.alpha = 1f
                 percentageView.alpha = 1f
-                boltImage.alpha = 0.35f + 0.65f * sin(PI * phase).toFloat()
+                boltImage.alpha = 0.2f + 0.8f * sin(PI * phase).toFloat()
+                val pulse = 1.0f + 0.18f * sin(PI * phase).toFloat()
+                boltImage.scaleX = pulse
+                boltImage.scaleY = pulse
             }
             else -> {
-                // Respiracao suave no uso normal: sem piscar de alerta.
-                frameImage.alpha = 0.92f + 0.08f * sin(PI * phase).toFloat()
+                // Sem carregador, a bateria fica fixa e nao pisca.
+                frameImage.alpha = 1f
                 percentageView.alpha = 1f
                 boltImage.alpha = 1f
+                boltImage.scaleX = 1f
+                boltImage.scaleY = 1f
             }
         }
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (!animator.isStarted) animator.start()
+        animationStartedAt = SystemClock.uptimeMillis()
+        removeCallbacks(frameTick)
+        post(frameTick)
     }
 
     override fun onDetachedFromWindow() {
-        animator.cancel()
+        removeCallbacks(frameTick)
         super.onDetachedFromWindow()
     }
 }

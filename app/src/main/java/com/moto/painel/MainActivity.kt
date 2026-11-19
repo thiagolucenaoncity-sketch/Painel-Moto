@@ -7,6 +7,7 @@ import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -70,6 +71,7 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.TransitionOptions
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
@@ -181,6 +183,8 @@ class SpeedArcView(ctx: Context) : View(ctx) {
     private var c3 = RED
     private var lim1 = 80
     private var lim2 = 120
+    private var style = 0
+    private var scaleMax = 200f
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -199,6 +203,15 @@ class SpeedArcView(ctx: Context) : View(ctx) {
         arcPaint.strokeWidth = w
     }
 
+    fun configure(styleId: Int, thicknessDp: Int, maxKmh: Int) {
+        style = styleId
+        scaleMax = maxKmh.coerceIn(120, 280).toFloat()
+        val stroke = context.pxF(thicknessDp.coerceIn(8, 24).toFloat())
+        trackPaint.strokeWidth = stroke
+        arcPaint.strokeWidth = stroke
+        invalidate()
+    }
+
     fun setZones(color1: Int, color2: Int, color3: Int, limit1: Int, limit2: Int, track: Int) {
         c1 = color1
         c2 = color2
@@ -210,23 +223,44 @@ class SpeedArcView(ctx: Context) : View(ctx) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val pad = context.pxF(16f)
-        val side = minOf(width, height) - pad * 2
+        super.onDraw(canvas)
+        if (width == 0 || height == 0) return
+        val frac = (speed / scaleMax).coerceIn(0f, 1f)
+        arcPaint.color = when {
+            speed <= lim1 -> c1
+            speed <= lim2 -> c2
+            else -> c3
+        }
+
+        if (style == 4) {
+            // Barra esportiva no rodapé do velocímetro, sem cobrir os números.
+            val left = context.pxF(28f)
+            val right = width - left
+            if (right <= left) return
+            val y = height * 0.80f
+            canvas.drawLine(left, y, right, y, trackPaint)
+            if (frac > 0f) canvas.drawLine(left, y, left + (right - left) * frac, y, arcPaint)
+            return
+        }
+
+        val pad = context.pxF(20f)
+        val side = (minOf(width, height).toFloat() - pad * 2f).coerceAtLeast(1f)
         val left = (width - side) / 2f
         val top = (height - side) / 2f
         rect.set(left, top, left + side, top + side)
-        canvas.drawArc(rect, 135f, 270f, false, trackPaint)
 
-        val frac = (speed / 200f).coerceIn(0f, 1f)
-        if (frac > 0f) {
-            // A cor do arco é a da faixa em que a velocidade atual está
-            arcPaint.color = when {
-                speed <= lim1 -> c1
-                speed <= lim2 -> c2
-                else -> c3
-            }
-            canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
+        val start = when (style) {
+            2 -> -90f // Anel 360°
+            3 -> 180f // Semicírculo superior
+            else -> 135f // Arco original
         }
+        val sweep = when (style) {
+            2 -> 360f
+            3 -> 180f
+            else -> 270f
+        }
+        canvas.drawArc(rect, start, sweep, false, trackPaint)
+        if (frac > 0f) canvas.drawArc(rect, start, sweep * frac, false, arcPaint)
     }
 }
 
@@ -411,6 +445,8 @@ class MainActivity : Activity() {
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
+    private lateinit var panelNightBtn: Button
+    private lateinit var panelVoiceBtn: Button
     private lateinit var cancelBtn: Button
 
     // Trips salvas
@@ -428,6 +464,8 @@ class MainActivity : Activity() {
     private var ttsReady = false
     private var voiceOn = true
     private var lastFix: Location? = null
+    // Posicao somente visual: ajustada a rota quando o GPS e suficientemente preciso.
+    private var mapFix: Location? = null
     // Rumo estabilizado: o mesmo valor controla mapa e marcador da moto.
     private var stableHeading = 0.0
     private var headingInitialized = false
@@ -615,6 +653,7 @@ class MainActivity : Activity() {
             tripLast = loc
             updateStableHeading(loc)
             lastFix = loc
+            mapFix = mapDisplayLocation(loc)
             roadAlerts.onLocation(loc)
             roadSpeedSource.onLocation(loc)
 
@@ -623,13 +662,14 @@ class MainActivity : Activity() {
                 firstFixDone = true
                 followMe = true
                 holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
-                    .forEach { followCamera(it, loc, false) }
+                    .forEach { followCamera(it, mapFix ?: loc, false) }
             } else if (followMe) {
-                // Só anima o mapa que está visível, sem renderizar duas câmeras por segundo.
+                // Camera e marcador usam EXATAMENTE o mesmo ponto no GPS.
+                // Sem interpolacao longa que fazia a moto andar na diagonal.
                 holders.filter { (it.interactive && screenMode == 1) || (!it.interactive && screenMode == 0) }
-                    .forEach { followCamera(it, loc, true) }
+                    .forEach { followCamera(it, mapFix ?: loc, false) }
             }
-            holders.forEach { updateMeMarker(it, loc) }
+            holders.forEach { updateMeMarker(it, mapFix ?: loc) }
             onFix(loc)
         }
 
@@ -683,6 +723,9 @@ class MainActivity : Activity() {
         var routeSrc: GeoJsonSource? = null
         var destSrc: GeoJsonSource? = null
         var alertSrc: GeoJsonSource? = null
+        // Evita reenviar o mesmo marcador a cada GPS, causando reprocessamento.
+        var lastMarkerPosition: Location? = null
+        var lastMarkerScreenBearing = Double.NaN
 
         init {
             view.onCreate(null)
@@ -849,11 +892,22 @@ class MainActivity : Activity() {
     private fun updateBattery() {
         if (!::batteryView.isInitialized) return
         val bm = getSystemService(BATTERY_SERVICE) as BatteryManager
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        if (pct in 0..100) {
-            // Exibe PNG animado conforme carregamento e nível real; sem emojis.
-            batteryView.update(pct, bm.isCharging)
-        }
+        // isCharging isolado nem sempre indica cabo conectado em aparelhos Android.
+        // ACTION_BATTERY_CHANGED e um broadcast fixo com status, tomada e percentual.
+        val info = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = info?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = info?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val fromIntent = if (level >= 0 && scale > 0)
+            ((level * 100f) / scale).roundToInt().coerceIn(0, 100) else -1
+        val pct = if (fromIntent >= 0) fromIntent
+            else bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val status = info?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = info?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val connected = plugged != 0 ||
+            status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL ||
+            bm.isCharging
+        if (pct in 0..100) batteryView.update(pct, connected)
     }
 
     // ---------- Trip (início, pausa, finalização e salvamento) ----------
@@ -1079,6 +1133,14 @@ class MainActivity : Activity() {
         addState(intArrayOf(), box(this@MainActivity, 0xCC0B1A33.toInt(), 14, 0x553A6FB0))
     }
 
+    // Centralização moderna: alvo vetorial, borda na cor do tema e área de toque maior.
+    private fun modernRecenterButton(): Button = floatBtn("") { recenter() }.apply {
+        panelIcon(R.drawable.ravo_recenter, Color.WHITE, 27)
+        background = box(this@MainActivity, 0xEE15385B.toInt(), 18, accent)
+        contentDescription = "Centralizar na minha localização"
+        elevation = pxF(4f)
+    }
+
     // Botão flutuante só com ícone
     private fun floatBtn(icon: String, onClick: () -> Unit): Button = Button(this).apply {
         text = icon
@@ -1264,6 +1326,10 @@ class MainActivity : Activity() {
 
     private fun onStyleReady(h: MapHolder, s: Style) {
         h.style = s
+        h.lastMarkerPosition = null
+        h.lastMarkerScreenBearing = Double.NaN
+        // Desliga o fade padrao dos simbolos a cada atualização dos dados/tiles.
+        s.setTransition(TransitionOptions(0L, 0L, false))
         if (isNightNow()) applyNightTheme(s)
         s.addImage("me-icon", ravoPositionMarker(this, Prefs.getInt(this, "marker"), Prefs.colorOf(this, "marker_c", accent), Prefs.colorOf(this, "bag_c", 0xFF2EA8FF.toInt())))
         // Ícones próprios; registrados novamente a cada troca de estilo claro/escuro.
@@ -1410,53 +1476,99 @@ class MainActivity : Activity() {
                 PropertyFactory.iconImage("me-icon"),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
-                PropertyFactory.iconRotate(Expression.get("bearing")),
-                // O ângulo GPS é relativo ao norte geográfico, não à tela.
-                // Evita a moto apontar ao contrário quando a câmera gira em 3D.
-                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconRotate(Expression.get("screenBearing")),
+                // O icone ja recebe angulo relativo a camera, ficando alinhado a via
+                // em vez de acompanhar uma rotacao diagonal inesperada.
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT),
                 PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT)
             )
         )
 
         refreshRoute(h)
         alerts.setGeoJson(roadAlerts.features())
-        lastFix?.let { loc ->
-            updateMeMarker(h, loc)
+        (mapFix ?: lastFix)?.let { loc ->
             followCamera(h, loc, false)
-        }
-        // Garante que o mapa já abre na inclinação escolhida
-        h.map?.let { m ->
-            m.easeCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
-                )
-            )
+            updateMeMarker(h, loc)
+        } ?: h.map?.let { m ->
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder(m.cameraPosition).tilt(if (is3D) 60.0 else 0.0).build()
+            ))
         }
     }
 
-    // Posiciona a câmera sobre você. Em 3D, o mapa gira com a direção do movimento.
+    // O ponto usado somente para o mapa pode ser projetado na rota conhecida.
+    // GPS e velocidade continuam com a medicao original, sem alterar a navegacao.
+    private fun mapDisplayLocation(loc: Location): Location {
+        if (routeDest == null || routePoints.size < 2 ||
+            (loc.hasAccuracy() && loc.accuracy > 30f)) return loc
+        val latScale = 111320.0
+        val lonScale = 111320.0 * cos(Math.toRadians(loc.latitude))
+        var bestDistance = Double.MAX_VALUE
+        var bestLat = loc.latitude
+        var bestLon = loc.longitude
+        for (i in 0 until routePoints.lastIndex) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            val dx = (b.longitude - a.longitude) * lonScale
+            val dy = (b.latitude - a.latitude) * latScale
+            val len2 = dx * dx + dy * dy
+            if (len2 < 0.01) continue
+            val px = (loc.longitude - a.longitude) * lonScale
+            val py = (loc.latitude - a.latitude) * latScale
+            val t = ((px * dx + py * dy) / len2).coerceIn(0.0, 1.0)
+            val diffX = px - t * dx
+            val diffY = py - t * dy
+            val dist2 = diffX * diffX + diffY * diffY
+            if (dist2 < bestDistance) {
+                bestDistance = dist2
+                bestLat = a.latitude + t * (b.latitude - a.latitude)
+                bestLon = a.longitude + t * (b.longitude - a.longitude)
+            }
+        }
+        if (bestDistance > 20.0 * 20.0) return loc
+        return Location(loc).apply {
+            latitude = bestLat
+            longitude = bestLon
+        }
+    }
+
+    // Perspectiva de navegacao tipo Waze: seu veiculo no centro horizontal,
+    // perto da parte inferior, com mais espaco para enxergar o caminho a frente.
     private fun followCamera(h: MapHolder, loc: Location, animate: Boolean) {
         val m = h.map ?: return
         val zoom = if (h.interactive) 17.0 else 16.0
         val bearing = if (is3D && headingInitialized) stableHeading else 0.0
+        val viewHeight = h.view.height.takeIf { it > 0 } ?: px(320)
         val pos = CameraPosition.Builder()
             .target(LatLng(loc.latitude, loc.longitude))
             .zoom(zoom)
             .tilt(if (is3D) 60.0 else 0.0)
             .bearing(bearing)
+            .padding(0.0, viewHeight * 0.48, 0.0, 0.0)
             .build()
         if (animate) {
-            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 800)
+            m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 500)
         } else {
+            // Nao deixar a moto ir na diagonal enquanto a camera interpola entre GPSs.
             m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
         }
     }
 
     private fun updateMeMarker(h: MapHolder, loc: Location) {
         val src = h.meSrc ?: return
-        val f = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
-        f.addNumberProperty("bearing", stableHeading)
-        src.setGeoJson(f)
+        val cameraBearing = h.map?.cameraPosition?.bearing ?: 0.0
+        val screenBearing = ((stableHeading - cameraBearing + 540.0) % 360.0) - 180.0
+        val prev = h.lastMarkerPosition
+        val change = if (prev != null) prev.distanceTo(loc) else Float.MAX_VALUE
+        val deltaBearing = if (h.lastMarkerScreenBearing.isFinite()) {
+            kotlin.math.abs(((screenBearing - h.lastMarkerScreenBearing + 540.0) % 360.0) - 180.0)
+        } else Double.MAX_VALUE
+        if (change < 1.3f && deltaBearing < 2.0) return
+        h.lastMarkerPosition = Location(loc)
+        h.lastMarkerScreenBearing = screenBearing
+        val feature = Feature.fromGeometry(Point.fromLngLat(loc.longitude, loc.latitude))
+        feature.addNumberProperty("screenBearing", screenBearing)
+        src.setGeoJson(feature)
     }
 
     private fun refreshRoute(h: MapHolder) {
@@ -1477,13 +1589,26 @@ class MainActivity : Activity() {
     }
 
     // Inclina ou volta o mapa (independente da opção de prédios)
+    private fun toggleNightOnPanel() {
+        mapMode = if (isNightNow()) 1 else 2
+        Prefs.putRaw(this, "map_style", mapMode)
+        applyMapStyle()
+        refreshMapButtons()
+    }
+
+    private fun toggleVoice() {
+        voiceOn = !voiceOn
+        if (!voiceOn) tts?.stop()
+        refreshMapButtons()
+    }
+
     private fun toggle3D() {
         is3D = !is3D
         holders.forEach { h ->
             val m = h.map
             if (m != null) {
                 if (followMe) {
-                    lastFix?.let { followCamera(h, it, true) }
+                    (mapFix ?: lastFix)?.let { followCamera(h, it, true) }
                 } else {
                     m.easeCamera(
                         CameraUpdateFactory.newCameraPosition(
@@ -1501,7 +1626,7 @@ class MainActivity : Activity() {
 
     // Centraliza o mapa completo na sua posição e volta a seguir
     private fun recenter() {
-        val loc = lastFix
+        val loc = mapFix ?: lastFix
         if (loc == null) {
             toast("Aguardando sinal do GPS...")
             return
@@ -1783,7 +1908,7 @@ class MainActivity : Activity() {
         musicDock.visibility = if (mode == 0 || mode == 1) View.VISIBLE else View.GONE
         // Atualiza a câmera ao trocar de mapa, já que mapas ocultos não são animados.
         if (mode == 0 || mode == 1) {
-            lastFix?.let { loc ->
+            (mapFix ?: lastFix)?.let { loc ->
                 if (followMe) holders.filter { it.interactive == (mode == 1) }
                     .forEach { followCamera(it, loc, false) }
             }
@@ -1997,22 +2122,29 @@ class MainActivity : Activity() {
     // Atualiza o destaque e a visibilidade dos botões flutuantes do mapa
     private fun refreshMapButtons() {
         if (!::mapStyleBtn.isInitialized) return
-        voiceBtn.text = ""
-        voiceBtn.contentDescription = if (voiceOn) "Desativar instruções de voz" else "Ativar instruções de voz"
-        val speaker = getDrawable(if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off)?.mutate()
-        speaker?.setBounds(0, 0, px(24), px(24))
-        // Foreground fica centralizado na area inteira do botao.
-        // CompoundDrawable superior deslocava o icone para cima.
-        voiceBtn.setCompoundDrawables(null, null, null, null)
-        voiceBtn.foregroundGravity = Gravity.CENTER
-        voiceBtn.foreground = speaker
-        setOn(voiceBtn, voiceOn)
+        // Voz sincronizada entre velocimetro e mapa inteiro.
+        listOf(voiceBtn, panelVoiceBtn).forEach { button ->
+            button.text = ""
+            button.contentDescription = if (voiceOn) "Desativar instruções de voz"
+                else "Ativar instruções de voz"
+            val speaker = getDrawable(
+                if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off
+            )?.mutate()
+            speaker?.setBounds(0, 0, px(24), px(24))
+            button.setCompoundDrawables(null, null, null, null)
+            button.foregroundGravity = Gravity.CENTER
+            button.foreground = speaker
+            setOn(button, voiceOn)
+        }
         mapStyleBtn.text = when (mapMode) {
             1 -> "☀"
             2 -> "☾"
             else -> "◐"
         }
         setOn(mapStyleBtn, mapMode != 0)
+        panelNightBtn.text = if (isNightNow()) "☀" else "☾"
+        panelNightBtn.contentDescription = if (isNightNow()) "Usar mapa claro" else "Usar modo noturno"
+        setOn(panelNightBtn, isNightNow())
         // Mesma indicação do botão do velocímetro: mostra o modo para o qual alterna.
         mapTiltBtn.text = modeLabel()
         mapTiltBtn.contentDescription = "Alternar mapa para ${modeLabel()}"
@@ -2290,10 +2422,14 @@ class MainActivity : Activity() {
 
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap(false)
-        minimap.alpha = 0.35f
-        arcView = SpeedArcView(this).apply { setZones(cArc1, cArc2, cArc3, arcLim1, arcLim2, cTrack) }
-        arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
-        val digital = gaugeStyle == 1
+        minimap.alpha = Prefs.intOr(this, "gauge_map_opacity", 35).coerceIn(15, 80) / 100f
+        arcView = SpeedArcView(this).apply {
+            setZones(cArc1, cArc2, cArc3, arcLim1, arcLim2, cTrack)
+            configure(gaugeStyle, Prefs.intOr(this@MainActivity, "gauge_stroke", 12),
+                Prefs.intOr(this@MainActivity, "gauge_max", 200))
+        }
+        arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
+        val digital = gaugeStyle == 1 || gaugeStyle == 5
         speedView = label(
             if (digital) (if (landscape) 110f else 120f) else (if (landscape) 64f else 84f),
             cNum,
@@ -2302,6 +2438,11 @@ class MainActivity : Activity() {
         ).apply {
             text = "0"
             maxLines = 1
+            if (gaugeStyle == 5) {
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                letterSpacing = 0.08f
+                setShadowLayer(pxF(7f), 0f, 0f, accent)
+            }
         }
         unitView = label(16f, cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
@@ -2321,6 +2462,28 @@ class MainActivity : Activity() {
                     rightMargin = px(8)
                 })
         }
+
+        // Mesmos controles do mapa completo na tela inicial: centralizar, noite e voz.
+        val miniCenterBtn = modernRecenterButton()
+        panelNightBtn = floatBtn("☾") { toggleNightOnPanel() }.apply {
+            textSize = 23f
+            contentDescription = "Alternar modo noturno"
+        }
+        panelVoiceBtn = floatBtn("") { toggleVoice() }.apply {
+            contentDescription = "Alternar instruções de voz"
+        }
+        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(58), px(58),
+            Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(12)
+            bottomMargin = px(10)
+        })
+        arcBlock.addView(panelNightBtn, FrameLayout.LayoutParams(px(48), px(48),
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = px(14) })
+        arcBlock.addView(panelVoiceBtn, FrameLayout.LayoutParams(px(48), px(48),
+            Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = px(12)
+            bottomMargin = px(14)
+        })
 
         // Linha de navegação: fica numa linha só e desliza se for longa
         navView = label(15f, cClock, bold = true, align = Gravity.CENTER).apply {
@@ -2664,11 +2827,7 @@ class MainActivity : Activity() {
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
-        voiceBtn = floatBtn("") {
-            voiceOn = !voiceOn
-            if (!voiceOn) tts?.stop()
-            refreshMapButtons()
-        }
+        voiceBtn = floatBtn("") { toggleVoice() }
         mapStyleBtn = floatBtn("◐") {
             mapMode = (mapMode + 1) % 3
             Prefs.putRaw(this, "map_style", mapMode)
@@ -2716,17 +2875,14 @@ class MainActivity : Activity() {
         )
 
         // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
-        // Centralização ligeiramente maior e mais legível na tela inteira.
-        val gpsBtn = floatBtn("◎") { recenter() }.apply {
-            textSize = 23f
-            contentDescription = "Centralizar mapa na minha localização"
-        }
+        // Botao centralizador mais moderno, com icone vetorial e contorno colorido.
+        val gpsBtn = modernRecenterButton()
         cancelBtn = floatBtn("✕") { clearRoute() }
         val backBtn = floatBtn("⌂") { setScreen(0) }
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(gpsBtn, LinearLayout.LayoutParams(px(56), px(56)))
+            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
             addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))

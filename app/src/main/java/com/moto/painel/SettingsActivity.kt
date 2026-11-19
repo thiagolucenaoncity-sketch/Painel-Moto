@@ -125,6 +125,10 @@ class SettingsActivity : Activity() {
     private fun addVelocimetro(col: LinearLayout) {
         add(col, section("FORMATO"), 0)
         add(col, cycler("Estilo", Prefs.GAUGE_NAMES, "gauge"))
+        add(col, numCycler("Espessura do indicador", Prefs.GAUGE_THICKNESS, "gauge_stroke", 12, " dp"))
+        add(col, numCycler("Escala máxima", Prefs.GAUGE_MAX_SPEED, "gauge_max", 200, " km/h"))
+        add(col, numCycler("Mapa atrás do velocímetro", Prefs.MAP_OPACITY, "gauge_map_opacity", 35, "%"))
+        add(col, note("Escolha Arco, Digital, Anel 360°, Semicírculo, Barra esportiva ou HUD digital. Personalize as cores, os limites, a espessura e a transparência do mapa. O valor mostrado continua sendo a velocidade medida pelo GPS."), 12)
 
         add(col, section("CORES POR VELOCIDADE"), 0)
         add(col, numCycler("Faixa 1 vai até", Prefs.LIMIT1_VALUES, "arc_lim1", 80, " km/h"))
