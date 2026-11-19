@@ -189,6 +189,12 @@ class RoadAlerts(
         Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)).apply {
             addStringProperty("type", it.type)
             addStringProperty("priority", priorities[it.id] ?: "other")
+            // A placa ao lado do radar só aparece quando a base conhece o limite.
+            // Sem valor cadastrado, não inventa velocidade.
+            val knownLimit = if (it.type == "radar") it.limit.toIntOrNull() else null
+            if (knownLimit != null && knownLimit in 10..140 && knownLimit % 5 == 0) {
+                addStringProperty("speedSign", "ravo-limit-" + knownLimit)
+            }
         }
     })
     private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, when (h.type) {
