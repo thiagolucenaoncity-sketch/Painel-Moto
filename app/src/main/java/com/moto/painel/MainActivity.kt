@@ -448,6 +448,9 @@ class MainActivity : Activity() {
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
+    private lateinit var mapToolsMenuBtn: Button
+    private lateinit var mapToolsColumn: LinearLayout
+    private var mapToolsExpanded = false
     private lateinit var panelNightBtn: Button
     private lateinit var panelVoiceBtn: Button
     private lateinit var cancelBtn: Button
@@ -687,7 +690,6 @@ class MainActivity : Activity() {
             holders.forEach { updateMeMarker(it, mapFix ?: loc) }
             updateEtaFromGps(loc)
             onFix(loc)
-            positionFullEtaCard()
         }
 
         override fun onProviderEnabled(provider: String) {}
@@ -764,8 +766,7 @@ class MainActivity : Activity() {
                     }
                 }
                 if (interactive) {
-                    // Mantem a previsao logo abaixo da moto ao mover ou girar o mapa.
-                    m.addOnCameraMoveListener { positionFullEtaCard() }
+                    // A previsao fica fixa no rodape, sem seguir o marcador.
                     m.addOnCameraIdleListener {
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
@@ -1932,7 +1933,6 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, loc, false) }
             }
         }
-        if (mode == 1) fullEtaCard.post { positionFullEtaCard() }
         if (mode == 2) refreshTripsList()
     }
 
@@ -1972,35 +1972,7 @@ class MainActivity : Activity() {
         panelEtaCard.render(arrival, durationText, distanceText)
         fullEtaCard.render(arrival, durationText, distanceText)
         panelEtaCard.visibility = View.VISIBLE
-        // INVISIBLE participa do layout: o mapa precisa medir o cartão antes
-        // de posicioná-lo abaixo da motinho. GONE deixaria largura/altura zero.
-        if (fullEtaCard.visibility == View.GONE) fullEtaCard.visibility = View.INVISIBLE
-        if (screenMode == 1) fullEtaCard.post { positionFullEtaCard() }
-    }
-
-    // A bolha fica abaixo da motinho *na tela*, inclusive quando o mapa gira
-    // ou e arrastado. Nao substitui o icone e nem desloca a camera.
-    private fun positionFullEtaCard() {
-        if (!::fullEtaCard.isInitialized || !::fullMap.isInitialized ||
-            !etaActive || screenMode != 1) return
-        val loc = mapFix ?: lastFix ?: return
-        val map = holders.firstOrNull { it.interactive }?.map ?: return
-        val w = fullMap.width
-        val h = fullMap.height
-        val cardW = fullEtaCard.width
-        val cardH = fullEtaCard.height
-        if (w < px(160) || h < px(200) || cardW <= 0 || cardH <= 0) return
-        val marker = map.projection.toScreenLocation(LatLng(loc.latitude, loc.longitude))
-        // Se o usuario abriu o mapa longe da sua posicao, oculta o cartao.
-        if (marker.x < -px(16) || marker.x > w + px(16) ||
-            marker.y < -px(16) || marker.y > h + px(16)) {
-            fullEtaCard.visibility = View.INVISIBLE
-            return
-        }
-        val maxX = (w - cardW - px(8)).coerceAtLeast(px(8)).toFloat()
-        val maxY = (h - cardH - px(102)).coerceAtLeast(px(130)).toFloat()
-        fullEtaCard.x = (marker.x - cardW / 2f).coerceIn(px(8).toFloat(), maxX)
-        fullEtaCard.y = (marker.y + px(38)).coerceIn(px(130).toFloat(), maxY)
+        // Previsao visivel e fixa na faixa inferior, independente da camera.
         fullEtaCard.visibility = View.VISIBLE
     }
 
@@ -2197,6 +2169,17 @@ class MainActivity : Activity() {
         }
         refreshEtaPanels()
         refreshMapButtons()
+    }
+
+    // Confirma antes de cancelar: evita toques acidentais durante a viagem.
+    private fun confirmCancelRoute() {
+        if (!hasRoute()) return
+        AlertDialog.Builder(this)
+            .setTitle("Cancelar rota?")
+            .setMessage("Você deseja mesmo cancelar a rota em andamento?")
+            .setNegativeButton("Não", null)
+            .setPositiveButton("Sim, cancelar") { _, _ -> clearRoute() }
+            .show()
     }
 
     private fun clearRoute() {
