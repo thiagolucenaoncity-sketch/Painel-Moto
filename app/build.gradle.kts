@@ -3,6 +3,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Assinatura permanente opcional: as credenciais vêm de Secrets do GitHub Actions.
+// Não guardar JKS ou senhas no repositório.
+val signingStoreFile = System.getenv("RAVO_SIGNING_STORE_FILE")
+val signingStorePassword = System.getenv("RAVO_SIGNING_STORE_PASSWORD")
+val signingKeyAlias = System.getenv("RAVO_SIGNING_KEY_ALIAS")
+val signingKeyPassword = System.getenv("RAVO_SIGNING_KEY_PASSWORD")
+val hasPersistentSigning = listOf(
+    signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.moto.painel"
     compileSdk = 34
@@ -15,8 +25,24 @@ android {
         versionName = "1.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
     }
 
+    signingConfigs {
+        if (hasPersistentSigning) {
+            create("ravoPersistent") {
+                storeFile = file(signingStoreFile!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (hasPersistentSigning) {
+                signingConfig = signingConfigs.getByName("ravoPersistent")
+            }
+        }
     }
 
     compileOptions {

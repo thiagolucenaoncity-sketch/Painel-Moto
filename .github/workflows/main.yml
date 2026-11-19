@@ -19,14 +19,52 @@ jobs:
         with:
           gradle-version: 8.7
 
-      - name: Testar consolidacao de radares e gerar APK
-        run: gradle testDebugUnitTest assembleDebug --no-daemon
-
-      - name: Renomear APK com a versão
+      # Sem os quatro Secrets, gera apenas APK de desenvolvimento.
+      # Essa versao NÃO garante atualização por cima de outro APK.
+      - name: Preparar chave permanente do RAVO
+        id: signing
+        shell: bash
+        env:
+          RAVO_KEYSTORE_BASE64: ${{ secrets.RAVO_KEYSTORE_BASE64 }}
+          RAVO_KEYSTORE_PASSWORD: ${{ secrets.RAVO_KEYSTORE_PASSWORD }}
+          RAVO_KEY_ALIAS: ${{ secrets.RAVO_KEY_ALIAS }}
+          RAVO_KEY_PASSWORD: ${{ secrets.RAVO_KEY_PASSWORD }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "RAVO_v1.1.${GITHUB_RUN_NUMBER}.apk"
+          if [[ -n "$RAVO_KEYSTORE_BASE64" && -n "$RAVO_KEYSTORE_PASSWORD" && -n "$RAVO_KEY_ALIAS" && -n "$RAVO_KEY_PASSWORD" ]]; then
+            umask 077
+            printf '%s' "$RAVO_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ravo-release.jks"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=APK nao atualizavel::Configure os quatro Secrets RAVO para assinar todas as versoes com a mesma chave."
+          fi
+
+      - name: Testar consolidacao de radares
+        run: gradle testDebugUnitTest --no-daemon
+
+      - name: Gerar APK atualizavel com assinatura permanente
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          RAVO_SIGNING_STORE_FILE: ${{ runner.temp }}/ravo-release.jks
+          RAVO_SIGNING_STORE_PASSWORD: ${{ secrets.RAVO_KEYSTORE_PASSWORD }}
+          RAVO_SIGNING_KEY_ALIAS: ${{ secrets.RAVO_KEY_ALIAS }}
+          RAVO_SIGNING_KEY_PASSWORD: ${{ secrets.RAVO_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Gerar APK de desenvolvimento sem chave permanente
+        if: steps.signing.outputs.enabled != 'true'
+        run: gradle assembleDebug --no-daemon
+
+      - name: Renomear APK para deixar a assinatura clara
+        shell: bash
+        run: |
+          if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
+            cp app/build/outputs/apk/release/app-release.apk "RAVO_atualizavel_v1.1.${GITHUB_RUN_NUMBER}.apk"
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk "RAVO_DEV_NAO_ATUALIZAVEL_v1.1.${GITHUB_RUN_NUMBER}.apk"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ravo-apk
-          path: RAVO_v*.apk
+          path: RAVO_*.apk
