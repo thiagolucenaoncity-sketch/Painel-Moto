@@ -445,6 +445,8 @@ class MainActivity : Activity() {
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
+    private lateinit var panelNightBtn: Button
+    private lateinit var panelVoiceBtn: Button
     private lateinit var cancelBtn: Button
 
     // Trips salvas
@@ -890,11 +892,22 @@ class MainActivity : Activity() {
     private fun updateBattery() {
         if (!::batteryView.isInitialized) return
         val bm = getSystemService(BATTERY_SERVICE) as BatteryManager
-        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        if (pct in 0..100) {
-            // Exibe PNG animado conforme carregamento e nível real; sem emojis.
-            batteryView.update(pct, bm.isCharging)
-        }
+        // isCharging isolado nem sempre indica cabo conectado em aparelhos Android.
+        // ACTION_BATTERY_CHANGED e um broadcast fixo com status, tomada e percentual.
+        val info = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = info?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = info?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val fromIntent = if (level >= 0 && scale > 0)
+            ((level * 100f) / scale).roundToInt().coerceIn(0, 100) else -1
+        val pct = if (fromIntent >= 0) fromIntent
+            else bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val status = info?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = info?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val connected = plugged != 0 ||
+            status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL ||
+            bm.isCharging
+        if (pct in 0..100) batteryView.update(pct, connected)
     }
 
     // ---------- Trip (início, pausa, finalização e salvamento) ----------
@@ -1118,6 +1131,14 @@ class MainActivity : Activity() {
     private fun floatBg(): StateListDrawable = StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_pressed), box(this@MainActivity, 0xEE1D3A66.toInt(), 14, 0x806FA8E8.toInt()))
         addState(intArrayOf(), box(this@MainActivity, 0xCC0B1A33.toInt(), 14, 0x553A6FB0))
+    }
+
+    // Centralização moderna: alvo vetorial, borda na cor do tema e área de toque maior.
+    private fun modernRecenterButton(): Button = floatBtn("") { recenter() }.apply {
+        panelIcon(R.drawable.ravo_recenter, Color.WHITE, 27)
+        background = box(this@MainActivity, 0xEE15385B.toInt(), 18, accent)
+        contentDescription = "Centralizar na minha localização"
+        elevation = pxF(4f)
     }
 
     // Botão flutuante só com ícone
@@ -1568,6 +1589,19 @@ class MainActivity : Activity() {
     }
 
     // Inclina ou volta o mapa (independente da opção de prédios)
+    private fun toggleNightOnPanel() {
+        mapMode = if (isNightNow()) 1 else 2
+        Prefs.putRaw(this, "map_style", mapMode)
+        applyMapStyle()
+        refreshMapButtons()
+    }
+
+    private fun toggleVoice() {
+        voiceOn = !voiceOn
+        if (!voiceOn) tts?.stop()
+        refreshMapButtons()
+    }
+
     private fun toggle3D() {
         is3D = !is3D
         holders.forEach { h ->
@@ -2088,22 +2122,29 @@ class MainActivity : Activity() {
     // Atualiza o destaque e a visibilidade dos botões flutuantes do mapa
     private fun refreshMapButtons() {
         if (!::mapStyleBtn.isInitialized) return
-        voiceBtn.text = ""
-        voiceBtn.contentDescription = if (voiceOn) "Desativar instruções de voz" else "Ativar instruções de voz"
-        val speaker = getDrawable(if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off)?.mutate()
-        speaker?.setBounds(0, 0, px(24), px(24))
-        // Foreground fica centralizado na area inteira do botao.
-        // CompoundDrawable superior deslocava o icone para cima.
-        voiceBtn.setCompoundDrawables(null, null, null, null)
-        voiceBtn.foregroundGravity = Gravity.CENTER
-        voiceBtn.foreground = speaker
-        setOn(voiceBtn, voiceOn)
+        // Voz sincronizada entre velocimetro e mapa inteiro.
+        listOf(voiceBtn, panelVoiceBtn).forEach { button ->
+            button.text = ""
+            button.contentDescription = if (voiceOn) "Desativar instruções de voz"
+                else "Ativar instruções de voz"
+            val speaker = getDrawable(
+                if (voiceOn) R.drawable.ravo_voice_on else R.drawable.ravo_voice_off
+            )?.mutate()
+            speaker?.setBounds(0, 0, px(24), px(24))
+            button.setCompoundDrawables(null, null, null, null)
+            button.foregroundGravity = Gravity.CENTER
+            button.foreground = speaker
+            setOn(button, voiceOn)
+        }
         mapStyleBtn.text = when (mapMode) {
             1 -> "☀"
             2 -> "☾"
             else -> "◐"
         }
         setOn(mapStyleBtn, mapMode != 0)
+        panelNightBtn.text = if (isNightNow()) "☀" else "☾"
+        panelNightBtn.contentDescription = if (isNightNow()) "Usar mapa claro" else "Usar modo noturno"
+        setOn(panelNightBtn, isNightNow())
         // Mesma indicação do botão do velocímetro: mostra o modo para o qual alterna.
         mapTiltBtn.text = modeLabel()
         mapTiltBtn.contentDescription = "Alternar mapa para ${modeLabel()}"
@@ -2421,6 +2462,28 @@ class MainActivity : Activity() {
                     rightMargin = px(8)
                 })
         }
+
+        // Mesmos controles do mapa completo na tela inicial: centralizar, noite e voz.
+        val miniCenterBtn = modernRecenterButton()
+        panelNightBtn = floatBtn("☾") { toggleNightOnPanel() }.apply {
+            textSize = 23f
+            contentDescription = "Alternar modo noturno"
+        }
+        panelVoiceBtn = floatBtn("") { toggleVoice() }.apply {
+            contentDescription = "Alternar instruções de voz"
+        }
+        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(58), px(58),
+            Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(12)
+            bottomMargin = px(10)
+        })
+        arcBlock.addView(panelNightBtn, FrameLayout.LayoutParams(px(48), px(48),
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = px(14) })
+        arcBlock.addView(panelVoiceBtn, FrameLayout.LayoutParams(px(48), px(48),
+            Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = px(12)
+            bottomMargin = px(14)
+        })
 
         // Linha de navegação: fica numa linha só e desliza se for longa
         navView = label(15f, cClock, bold = true, align = Gravity.CENTER).apply {
@@ -2764,11 +2827,7 @@ class MainActivity : Activity() {
         frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
 
         // ----- Lateral direita: voz, modo noturno e inclinação 3D (só ícones) -----
-        voiceBtn = floatBtn("") {
-            voiceOn = !voiceOn
-            if (!voiceOn) tts?.stop()
-            refreshMapButtons()
-        }
+        voiceBtn = floatBtn("") { toggleVoice() }
         mapStyleBtn = floatBtn("◐") {
             mapMode = (mapMode + 1) % 3
             Prefs.putRaw(this, "map_style", mapMode)
@@ -2816,17 +2875,14 @@ class MainActivity : Activity() {
         )
 
         // ----- Inferior: GPS (esquerda), cancelar rota (centro, só com rota), voltar ao painel (direita) -----
-        // Centralização ligeiramente maior e mais legível na tela inteira.
-        val gpsBtn = floatBtn("◎") { recenter() }.apply {
-            textSize = 23f
-            contentDescription = "Centralizar mapa na minha localização"
-        }
+        // Botao centralizador mais moderno, com icone vetorial e contorno colorido.
+        val gpsBtn = modernRecenterButton()
         cancelBtn = floatBtn("✕") { clearRoute() }
         val backBtn = floatBtn("⌂") { setScreen(0) }
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(gpsBtn, LinearLayout.LayoutParams(px(56), px(56)))
+            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
             addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)))
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
