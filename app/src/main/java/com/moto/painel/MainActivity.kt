@@ -369,7 +369,7 @@ class MainActivity : Activity() {
     private lateinit var minimap: MapView
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
-    private lateinit var batteryView: TextView
+    private lateinit var batteryView: BatteryStatusView
     private lateinit var gpsView: TextView
     private lateinit var vehicleView: LinearLayout
     private lateinit var nickView: TextView
@@ -850,8 +850,10 @@ class MainActivity : Activity() {
         if (!::batteryView.isInitialized) return
         val bm = getSystemService(BATTERY_SERVICE) as BatteryManager
         val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val icon = if (bm.isCharging) "⚡" else "🔋"
-        batteryView.text = "$icon $pct%"
+        if (pct in 0..100) {
+            // Exibe PNG animado conforme carregamento e nível real; sem emojis.
+            batteryView.update(pct, bm.isCharging)
+        }
     }
 
     // ---------- Trip (início, pausa, finalização e salvamento) ----------
@@ -2258,7 +2260,7 @@ class MainActivity : Activity() {
         clockView = label(20f, cClock, bold = true, mono = true)
         gpsView = label(12f, cLabel, align = Gravity.CENTER)
         dateView = label(12f, cLabel, align = Gravity.END)
-        batteryView = label(12f, cLabel, align = Gravity.END)
+        batteryView = BatteryStatusView(this, cLabel)
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
