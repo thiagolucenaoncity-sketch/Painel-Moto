@@ -1365,22 +1365,35 @@ class MainActivity : Activity() {
         }
         // A placa numérica aparece AO LADO do ícone, nos dois mapas.
         // É o limite fiscalizado pelo radar, independente do limite da via.
-        s.addLayer(
-            SymbolLayer("ravo-radar-speed-plate", "alerts-src").withFilter(
-                Expression.all(
-                    Expression.eq(Expression.get("type"), Expression.literal("radar")),
-                    Expression.has("speedSign")
+        for (priority in listOf("other", "route", "next")) {
+            val plateSize = when (priority) {
+                "next" -> 0.72f
+                "route" -> 0.62f
+                else -> 0.52f
+            }
+            val sideOffset = when (priority) {
+                "next" -> 124f
+                "route" -> 120f
+                else -> 112f
+            }
+            s.addLayer(
+                SymbolLayer("ravo-radar-speed-$priority", "alerts-src").withFilter(
+                    Expression.all(
+                        Expression.eq(Expression.get("type"), Expression.literal("radar")),
+                        Expression.eq(Expression.get("priority"), Expression.literal(priority)),
+                        Expression.has("speedSign")
+                    )
+                ).withProperties(
+                    PropertyFactory.iconImage(Expression.get("speedSign")),
+                    PropertyFactory.iconSize(plateSize),
+                    PropertyFactory.iconOffset(arrayOf(sideOffset, 0f)),
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.iconIgnorePlacement(true),
+                    PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+                    PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT)
                 )
-            ).withProperties(
-                PropertyFactory.iconImage(Expression.get("speedSign")),
-                PropertyFactory.iconSize(0.60f),
-                PropertyFactory.iconOffset(arrayOf(70f, 0f)),
-                PropertyFactory.iconAllowOverlap(true),
-                PropertyFactory.iconIgnorePlacement(true),
-                PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
-                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT)
             )
-        )
+        }
         s.addLayer(
             CircleLayer("dest-layer", "dest-src").withProperties(
                 PropertyFactory.circleColor(accent),
