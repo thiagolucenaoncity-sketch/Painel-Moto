@@ -1154,7 +1154,7 @@ class MainActivity : Activity() {
         val parent = musicDock.parent as? View ?: return
         if (parent.width <= 0 || parent.height <= 0) return
 
-        val buttonSize = px(if (screenMode == 0) 46 else 56)
+        val buttonSize = px(if (screenMode == 0) 42 else 56)
         val popupWidth = px(280).coerceAtMost((parent.width - px(32)).coerceAtLeast(px(160)))
         val fabLp = LinearLayout.LayoutParams(buttonSize, buttonSize).apply {
             gravity = Gravity.START
@@ -1213,7 +1213,7 @@ class MainActivity : Activity() {
 
     private fun updateMusicFabAppearance() {
         if (!::musicFab.isInitialized) return
-        val size = if (screenMode == 0) 24 else 30
+        val size = if (screenMode == 0) 22 else 30
         val drawable = getDrawable(
             if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_moderno
         )?.mutate()
@@ -1223,7 +1223,7 @@ class MainActivity : Activity() {
         musicFab.setCompoundDrawables(null, null, null, null)
         musicFab.foregroundGravity = Gravity.CENTER
         musicFab.foreground = drawable
-        musicFab.background = box(this, accent, if (screenMode == 0) 23 else 28, 0x77FFFFFF)
+        musicFab.background = box(this, accent, if (screenMode == 0) 21 else 28, 0x77FFFFFF)
         musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
             else "Abrir player de áudio"
     }
@@ -1548,7 +1548,9 @@ class MainActivity : Activity() {
             .zoom(zoom)
             .tilt(if (is3D) 60.0 else 0.0)
             .bearing(bearing)
-            .padding(0.0, viewHeight * 0.48, 0.0, 0.0)
+            // Camera de navegacao: moto mais baixa no mapa completo e
+            // proxima ao rodape do minimapa, deixando a via adiante visivel.
+            .padding(0.0, viewHeight * (if (h.interactive) 0.56 else 0.67), 0.0, 0.0)
             .build()
         if (animate) {
             m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 500)
@@ -2471,7 +2473,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-            setPadding(px(16), px(12), px(16), px(16))
+            setPadding(px(12), px(8), px(12), px(9))
         }
 
         // Barra superior: relógio, GPS e, à direita, data e bateria
@@ -2497,11 +2499,11 @@ class MainActivity : Activity() {
         panelEtaCard = RouteEtaCard(this, accent)
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
-        nickView = label(24f, accent, bold = true, align = Gravity.CENTER).apply {
+        nickView = label(20f, accent, bold = true, align = Gravity.CENTER).apply {
             text = nick
             visibility = if (nick.isEmpty()) View.GONE else View.VISIBLE
         }
-        modelView = label(14f, cLabel, align = Gravity.CENTER).apply {
+        modelView = label(12f, cLabel, align = Gravity.CENTER).apply {
             text = brandModel
             visibility = if (brandModel.isEmpty()) View.GONE else View.VISIBLE
         }
@@ -2542,7 +2544,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             // O mapa ganha altura e a velocidade sobe para deixar a moto livre abaixo.
-            translationY = -pxF(if (landscape) 16f else 46f)
+            translationY = -pxF(if (landscape) 22f else 65f)
             addView(speedView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(unitView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
@@ -2766,8 +2768,8 @@ class MainActivity : Activity() {
             gravity = Gravity.START
         }
         musicDock.addView(musicFab, LinearLayout.LayoutParams(
-            px(if (screenMode == 0) 46 else 56),
-            px(if (screenMode == 0) 46 else 56)
+            px(if (screenMode == 0) 42 else 56),
+            px(if (screenMode == 0) 42 else 56)
         ))
         musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP).apply {
             topMargin = px(8)
@@ -2776,34 +2778,42 @@ class MainActivity : Activity() {
         // Configurações na linha do nome/modelo, no canto superior direito.
         // Mapa e trips salvas passam para o rodapé, acima dos dados da trip.
         val mapBtn = miniBtn("").apply {
-            panelIcon(R.drawable.ravo_menu_map, accent, 25)
+            panelIcon(R.drawable.ravo_menu_map, accent, 22)
             contentDescription = "Abrir mapa completo"
         }
         mapBtn.setOnClickListener { setScreen(1) }
         val tripsBtn = miniBtn("").apply {
-            panelIcon(R.drawable.ravo_panel_trips, accent, 25)
+            panelIcon(R.drawable.ravo_panel_trips, accent, 22)
             contentDescription = "Abrir trips salvas"
         }
         tripsBtn.setOnClickListener { setScreen(2) }
         val settingsBtn = miniBtn("").apply {
-            panelIcon(R.drawable.ravo_panel_settings, accent, 25)
+            panelIcon(R.drawable.ravo_panel_settings, accent, 21)
             contentDescription = "Abrir configurações"
         }
         settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         val vehicleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(px(48), px(48)))
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(px(42), px(42)))
             addView(vehicleView, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(48)))
+            addView(settingsBtn, LinearLayout.LayoutParams(px(42), px(42)))
         }
         // Dois acessos separados para evitar toque errado ao pilotar.
+        // Instrução da rota centralizada ENTRE os acessos ao mapa e trips.
+        navView.textSize = 13f
+        navView.setAutoSizeTextTypeUniformWithConfiguration(
+            10, 14, 1, TypedValue.COMPLEX_UNIT_SP
+        )
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(mapBtn, LinearLayout.LayoutParams(px(58), px(48)))
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, px(1), 1f))
-            addView(tripsBtn, LinearLayout.LayoutParams(px(58), px(48)))
+            addView(mapBtn, LinearLayout.LayoutParams(px(44), px(40)))
+            addView(navView, LinearLayout.LayoutParams(0, px(40), 1f).apply {
+                leftMargin = px(6)
+                rightMargin = px(6)
+            })
+            addView(tripsBtn, LinearLayout.LayoutParams(px(44), px(40)))
         }
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
@@ -2818,8 +2828,7 @@ class MainActivity : Activity() {
             left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            right.addView(navView, gap(0))
-            right.addView(navRow, gap(6))
+            right.addView(navRow, gap(4))
             right.addView(tripHeader, gap(6))
             right.addView(statsBox, gap(4))
             right.addView(tripRow, gap(8))
@@ -2837,11 +2846,10 @@ class MainActivity : Activity() {
             root.addView(panelEtaCard, gap(4))
             root.addView(vehicleRow, gap(0))
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            root.addView(navView, gap(4))
-            root.addView(navRow, gap(6))
-            root.addView(tripHeader, gap(3))
-            root.addView(statsBox, gap(3))
-            root.addView(tripRow, gap(6))
+            root.addView(navRow, gap(4))
+            root.addView(tripHeader, gap(2))
+            root.addView(statsBox, gap(2))
+            root.addView(tripRow, gap(4))
         }
         return root
     }
