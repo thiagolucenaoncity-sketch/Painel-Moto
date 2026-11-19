@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Instalar leitor OSM PBF
+        run: python -m pip install --disable-pip-version-check osmium
       - name: Consultar semaforos estaduais no OSM e validar CSV
         run: python scripts/generate_sp_traffic_signals.py
       - name: Salvar a base estadual no GitHub
