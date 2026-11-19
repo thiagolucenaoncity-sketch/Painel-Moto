@@ -181,6 +181,8 @@ class SpeedArcView(ctx: Context) : View(ctx) {
     private var c3 = RED
     private var lim1 = 80
     private var lim2 = 120
+    private var style = 0
+    private var scaleMax = 200f
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -199,6 +201,15 @@ class SpeedArcView(ctx: Context) : View(ctx) {
         arcPaint.strokeWidth = w
     }
 
+    fun configure(styleId: Int, thicknessDp: Int, maxKmh: Int) {
+        style = styleId
+        scaleMax = maxKmh.coerceIn(120, 280).toFloat()
+        val stroke = context.pxF(thicknessDp.coerceIn(8, 24).toFloat())
+        trackPaint.strokeWidth = stroke
+        arcPaint.strokeWidth = stroke
+        invalidate()
+    }
+
     fun setZones(color1: Int, color2: Int, color3: Int, limit1: Int, limit2: Int, track: Int) {
         c1 = color1
         c2 = color2
@@ -210,23 +221,44 @@ class SpeedArcView(ctx: Context) : View(ctx) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val pad = context.pxF(16f)
-        val side = minOf(width, height) - pad * 2
+        super.onDraw(canvas)
+        if (width == 0 || height == 0) return
+        val frac = (speed / scaleMax).coerceIn(0f, 1f)
+        arcPaint.color = when {
+            speed <= lim1 -> c1
+            speed <= lim2 -> c2
+            else -> c3
+        }
+
+        if (style == 4) {
+            // Barra esportiva no rodapé do velocímetro, sem cobrir os números.
+            val left = context.pxF(28f)
+            val right = width - left
+            if (right <= left) return
+            val y = height * 0.80f
+            canvas.drawLine(left, y, right, y, trackPaint)
+            if (frac > 0f) canvas.drawLine(left, y, left + (right - left) * frac, y, arcPaint)
+            return
+        }
+
+        val pad = context.pxF(20f)
+        val side = (minOf(width, height).toFloat() - pad * 2f).coerceAtLeast(1f)
         val left = (width - side) / 2f
         val top = (height - side) / 2f
         rect.set(left, top, left + side, top + side)
-        canvas.drawArc(rect, 135f, 270f, false, trackPaint)
 
-        val frac = (speed / 200f).coerceIn(0f, 1f)
-        if (frac > 0f) {
-            // A cor do arco é a da faixa em que a velocidade atual está
-            arcPaint.color = when {
-                speed <= lim1 -> c1
-                speed <= lim2 -> c2
-                else -> c3
-            }
-            canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
+        val start = when (style) {
+            2 -> -90f // Anel 360°
+            3 -> 180f // Semicírculo superior
+            else -> 135f // Arco original
         }
+        val sweep = when (style) {
+            2 -> 360f
+            3 -> 180f
+            else -> 270f
+        }
+        canvas.drawArc(rect, start, sweep, false, trackPaint)
+        if (frac > 0f) canvas.drawArc(rect, start, sweep * frac, false, arcPaint)
     }
 }
 
@@ -2290,10 +2322,14 @@ class MainActivity : Activity() {
 
         // Velocímetro: miniatura do mapa ao fundo, arco e velocidade por cima
         minimap = newMap(false)
-        minimap.alpha = 0.35f
-        arcView = SpeedArcView(this).apply { setZones(cArc1, cArc2, cArc3, arcLim1, arcLim2, cTrack) }
-        arcView.visibility = if (gaugeStyle == 1) View.GONE else View.VISIBLE
-        val digital = gaugeStyle == 1
+        minimap.alpha = Prefs.intOr(this, "gauge_map_opacity", 35).coerceIn(15, 80) / 100f
+        arcView = SpeedArcView(this).apply {
+            setZones(cArc1, cArc2, cArc3, arcLim1, arcLim2, cTrack)
+            configure(gaugeStyle, Prefs.intOr(this@MainActivity, "gauge_stroke", 12),
+                Prefs.intOr(this@MainActivity, "gauge_max", 200))
+        }
+        arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
+        val digital = gaugeStyle == 1 || gaugeStyle == 5
         speedView = label(
             if (digital) (if (landscape) 110f else 120f) else (if (landscape) 64f else 84f),
             cNum,
@@ -2302,6 +2338,11 @@ class MainActivity : Activity() {
         ).apply {
             text = "0"
             maxLines = 1
+            if (gaugeStyle == 5) {
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                letterSpacing = 0.08f
+                setShadowLayer(pxF(7f), 0f, 0f, accent)
+            }
         }
         unitView = label(16f, cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
