@@ -49,7 +49,17 @@ jobs:
           git add app/src/main/assets/roadalerts/sp_semaforos.csv data/traffic_quality/sp_semaforos_report.json
           if ! git diff --cached --quiet; then
             git commit -m "data: consolidar semaforos SP offline e auditoria de fontes"
-            git push origin HEAD:main
+            # Uma compilação ou alteração de código pode chegar à main durante
+            # o processamento do PBF. Reaplica o commit sem forçar o histórico.
+            for attempt in 1 2 3; do
+              git fetch origin main
+              git rebase origin/main || { git rebase --abort; exit 1; }
+              if git push origin HEAD:main; then
+                exit 0
+              fi
+            done
+            echo "Nao foi possivel publicar sem conflito apos 3 tentativas" >&2
+            exit 1
           else
             echo "Base sem alteracoes"
           fi
