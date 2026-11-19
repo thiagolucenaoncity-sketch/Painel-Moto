@@ -155,7 +155,7 @@ class SettingsActivity : Activity() {
             java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale("pt", "BR")).format(java.util.Date(updatedAt))
         else "base incluída no APK"
         add(col, note("Radares e lombadas de São Paulo são consultados diretamente no celular, mesmo sem internet. A base Pardal (ODbL) é verificada para atualização automática a cada 15 dias quando o app estiver aberto e conectado. Última atualização: $updatedLabel. Em caso de falha, os dados anteriores permanecem."), 12)
-        add(col, note("Semáforos: fonte separada do OpenStreetMap; são baixados por região quando há internet e ficam em cache. Não indicam o estado real das luzes. Avisos por voz e bipes permanecem para radares e lombadas. Os registros podem estar desatualizados."), 12)
+        add(col, note("Semáforos: o RAVO prioriza a base de São Paulo incluída no APK e guarda as atualizações no celular (até a cada 15 dias, com conexão). Se a base estadual ainda não estiver disponível, mantém a consulta por região e o cache. Os ícones NÃO indicam se o sinal está verde, amarelo ou vermelho; pontos podem faltar ou estar desatualizados."), 12)
     }
 
     private fun addAbertura(col: LinearLayout) {
