@@ -1,0 +1,15 @@
+{
+  "additional_distinct_points": 0,
+  "ambiguous_not_merged": 0,
+  "cross_source_confirmations": 0,
+  "input_counts": {
+    "osm": 16047
+  },
+  "match_radius_m": 12.0,
+  "matched_records": 0,
+  "max_coordinate_shift_m": 5.0,
+  "nearby_duplicates_suppressed": 0,
+  "output_count": 16047,
+  "primary": "OpenStreetMap (ODbL)",
+  "warning": "Sources may be incomplete. Not all nearby nodes refer to the same device."
+}
