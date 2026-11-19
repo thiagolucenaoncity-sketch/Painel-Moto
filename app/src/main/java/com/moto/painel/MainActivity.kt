@@ -2550,15 +2550,23 @@ class MainActivity : Activity() {
             addView(arcView, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
+            // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
-                Gravity.TOP or Gravity.END).apply {
+                Gravity.TOP or Gravity.START).apply {
                     topMargin = px(8)
-                    rightMargin = px(8)
+                    leftMargin = px(8)
                 })
         }
 
-        // Mesmos controles do mapa completo na tela inicial: centralizar, noite e voz.
+        // Tela inicial: alvo de centralização no mesmo canto, um pouco menor.
         val miniCenterBtn = modernRecenterButton()
+        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(52), px(52),
+            Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(12)
+            bottomMargin = px(10)
+        })
+
+        // Voz e modo noturno um abaixo do outro, no alto à direita do minimapa.
         panelNightBtn = floatBtn("☾") { toggleNightOnPanel() }.apply {
             textSize = 23f
             contentDescription = "Alternar modo noturno"
@@ -2566,17 +2574,18 @@ class MainActivity : Activity() {
         panelVoiceBtn = floatBtn("") { toggleVoice() }.apply {
             contentDescription = "Alternar instruções de voz"
         }
-        arcBlock.addView(miniCenterBtn, FrameLayout.LayoutParams(px(58), px(58),
-            Gravity.BOTTOM or Gravity.START).apply {
-            leftMargin = px(12)
-            bottomMargin = px(10)
-        })
-        arcBlock.addView(panelNightBtn, FrameLayout.LayoutParams(px(48), px(48),
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = px(14) })
-        arcBlock.addView(panelVoiceBtn, FrameLayout.LayoutParams(px(48), px(48),
-            Gravity.BOTTOM or Gravity.END).apply {
+        val miniTools = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(panelNightBtn, LinearLayout.LayoutParams(px(46), px(46)))
+            addView(panelVoiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply {
+                topMargin = px(9)
+            })
+        }
+        arcBlock.addView(miniTools, FrameLayout.LayoutParams(WRAP, WRAP,
+            Gravity.TOP or Gravity.END).apply {
             rightMargin = px(12)
-            bottomMargin = px(14)
+            topMargin = px(10)
         })
 
         // Linha de navegação: fica numa linha só e desliza se for longa
