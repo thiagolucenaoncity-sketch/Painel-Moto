@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -39,6 +40,8 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
             gravity = Gravity.CENTER
             includeFontPadding = true
             maxLines = 1
+            // Mantem ETA, minutos e km legiveis no espaco entre GPS e inicio.
+            setAutoSizeTextTypeUniformWithConfiguration(10, 16, 1, TypedValue.COMPLEX_UNIT_SP)
         }
         container.addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         return container to value
