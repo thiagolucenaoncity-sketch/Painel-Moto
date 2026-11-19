@@ -15,8 +15,8 @@ import kotlin.math.sqrt
 import kotlin.math.abs
 
 /**
- * Pontos colaborativos do OpenStreetMap via Overpass.
- * Não são dados em tempo real nem garantem cobertura completa.
+ * Radares e lombadas de SP: base Pardal embarcada, atualizável a cada 15 dias.
+ * Semáforos: cache separado. São dados auxiliares, nunca em tempo real.
  */
 class RoadAlerts(
     private val context: Context,
@@ -29,6 +29,7 @@ class RoadAlerts(
     private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
     private var hazards: List<Hazard> = emptyList()
     private var fetching = false
+    private var databaseReloadPending = false
     private var lastFetch = 0L
     private var center: Location? = null
     private var attemptedCenter: Location? = null
@@ -256,10 +257,18 @@ class RoadAlerts(
         }
     }
 
+    /** Uma atualização concluída substitui os dados locais sem reiniciar o mapa ou GPS. */
+    fun databaseUpdated() {
+        bundled = null
+        val position = center ?: attemptedCenter ?: return
+        if (fetching) databaseReloadPending = true
+        else load(Location(position))
+    }
+
     private fun readBundled(): List<Hazard> {
         bundled?.let { return it }
         val points = ArrayList<Hazard>()
-        context.assets.open("roadalerts/sp_radares.csv").bufferedReader().useLines { lines ->
+        RadarDatabaseUpdater.reader(context, "sp_radares.csv").useLines { lines ->
             lines.drop(1).forEachIndexed { i, line ->
                 val columns = line.split(',')
                 if (columns.size < 9 || columns[5] != "1") return@forEachIndexed
@@ -270,7 +279,7 @@ class RoadAlerts(
                     columns[3].filter { it.isDigit() }, columns[8].toFloatOrNull()))
             }
         }
-        context.assets.open("roadalerts/sp_lombadas.csv").bufferedReader().useLines { lines ->
+        RadarDatabaseUpdater.reader(context, "sp_lombadas.csv").useLines { lines ->
             lines.drop(1).forEachIndexed { i, line ->
                 val c = line.split(',')
                 if (c.size < 3 || c[2] == "RUMBLE_STRIP") return@forEachIndexed
@@ -322,7 +331,13 @@ class RoadAlerts(
                     }
                 }
             } finally {
-                handler.post { fetching = false }
+                handler.post {
+                    fetching = false
+                    if (databaseReloadPending && active) {
+                        databaseReloadPending = false
+                        (center ?: attemptedCenter)?.let { load(Location(it)) }
+                    }
+                }
             }
         }.start()
     }
