@@ -3,6 +3,7 @@ package com.moto.painel
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.AtomicFile
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -26,20 +27,101 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
     private var lastLat = 0.0
     private var lastLon = 0.0
     private var active = true
+    private var statewideData = false
+    private val syncPrefs = context.getSharedPreferences("ravo_semaforo_sync", Context.MODE_PRIVATE)
+    private val statewideUrl = "https://raw.githubusercontent.com/thiagolucenaoncity-sketch/Ravo/main/app/src/main/assets/roadalerts/sp_semaforos.csv"
 
-    init {
-        try {
-            if (file.exists()) file.bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    val p = line.split(',')
-                    if (p.size >= 3) {
-                        val lat = p[1].toDoubleOrNull()
-                        val lon = p[2].toDoubleOrNull()
-                        if (lat != null && lon != null) points[p[0]] = Signal(p[0], lat, lon)
-                    }
+    /** Mantém somente pontos reais, com coordenadas e ID, sem assumir cobertura total. */
+    private fun parseCsv(reader: java.io.BufferedReader): LinkedHashMap<String, Signal> {
+        val loaded = LinkedHashMap<String, Signal>()
+        reader.useLines { lines ->
+            lines.forEach { line ->
+                val p = line.split(',')
+                if (p.size < 3) return@forEach
+                val lat = p[1].toDoubleOrNull() ?: return@forEach
+                val lon = p[2].toDoubleOrNull() ?: return@forEach
+                if (p[0].startsWith("osm:") && lat in -25.6..-19.5 && lon in -53.3..-43.5) {
+                    loaded[p[0]] = Signal(p[0], lat, lon)
                 }
             }
-        } catch (_: Exception) { /* Cache opcional: não afeta radares. */ }
+        }
+        return loaded
+    }
+
+    private fun fetchStatewideWhenDue() {
+        val now = System.currentTimeMillis()
+        val lastSuccess = syncPrefs.getLong("success", 0L)
+        val lastAttempt = syncPrefs.getLong("attempt", 0L)
+        val period = 15L * 24L * 60L * 60L * 1000L
+        if (!active || fetching ||
+            (lastSuccess > 0 && now - lastSuccess in 0 until period) ||
+            (lastAttempt > 0 && now - lastAttempt in 0 until (6L * 60L * 60L * 1000L))) return
+        fetching = true
+        syncPrefs.edit().putLong("attempt", now).apply()
+        Thread {
+            try {
+                val connection = URL(statewideUrl).openConnection() as HttpURLConnection
+                val downloaded = try {
+                    connection.connectTimeout = 8000
+                    connection.readTimeout = 20000
+                    connection.setRequestProperty("Accept", "text/csv")
+                    if (connection.responseCode !in 200..299) error("CSV unavailable")
+                    val raw = connection.inputStream.use { it.readNBytes(3_000_001) }
+                    require(raw.size < 3_000_001) { "State CSV too large" }
+                    raw
+                } finally {
+                    connection.disconnect()
+                }
+                require(downloaded.toString(Charsets.UTF_8).startsWith("id,lat,lon")) {
+                    "Invalid CSV format"
+                }
+                val updated = parseCsv(downloaded.inputStream().bufferedReader())
+                require(updated.size >= 5000 && updated.size >= points.size * 0.75) {
+                    "Incomplete statewide data"
+                }
+                // Só troca a base após download validado e gravação atômica.
+                val atomic = AtomicFile(file)
+                val stream = atomic.startWrite()
+                try {
+                    stream.write(downloaded)
+                    atomic.finishWrite(stream)
+                } catch (e: Exception) {
+                    atomic.failWrite(stream)
+                    throw e
+                }
+                syncPrefs.edit().putLong("success", System.currentTimeMillis()).apply()
+                handler.post {
+                    if (!active) return@post
+                    points.clear()
+                    points.putAll(updated)
+                    statewideData = true
+                    changed()
+                }
+            } catch (_: Exception) {
+                // Continua usando o arquivo incluído no APK ou cache offline.
+            } finally {
+                handler.post { fetching = false }
+            }
+        }.start()
+    }
+
+    init {
+        val stored = try {
+            if (file.exists()) parseCsv(file.bufferedReader()) else LinkedHashMap()
+        } catch (_: Exception) { LinkedHashMap<String, Signal>() }
+        val bundled = try {
+            context.assets.open("roadalerts/sp_semaforos.csv").bufferedReader().use { input ->
+                parseCsv(input)
+            }
+        } catch (_: Exception) { LinkedHashMap<String, Signal>() }
+        // Arquivo estadual completo tem prioridade sobre o cache regional antigo.
+        val selected = when {
+            stored.size >= 5000 -> stored
+            bundled.size >= 5000 -> bundled
+            else -> stored
+        }
+        points.putAll(selected)
+        statewideData = selected.size >= 5000
     }
 
     fun close() { active = false }
@@ -53,6 +135,11 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
     }
 
     fun fetchAt(lat: Double, lon: Double) {
+        if (statewideData) {
+            // Sem pesquisa por região: só atualiza o CSV estadual após 15 dias.
+            fetchStatewideWhenDue()
+            return
+        }
         if (!active || fetching || lat !in -85.0..85.0 || lon !in -180.0..180.0) return
         val now = System.currentTimeMillis()
         val moved = kotlin.math.abs(lat - lastLat) + kotlin.math.abs(lon - lastLon) > 0.016
