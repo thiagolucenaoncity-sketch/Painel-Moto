@@ -1,0 +1,45 @@
+name: Atualizar semaforos SP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/generate_sp_traffic_signals.py
+      - .github/workflows/update-sp-semaforos.yml
+  schedule:
+    # Aproximadamente quinzenal, nos dias 1 e 16 de cada mês (UTC).
+    - cron: '13 9 1,16 * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-sp-semaforos
+  cancel-in-progress: false
+
+jobs:
+  update-signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Consultar semaforos estaduais no OSM e validar CSV
+        run: python scripts/generate_sp_traffic_signals.py
+      - name: Salvar a base estadual no GitHub
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/roadalerts/sp_semaforos.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "data: atualizar semaforos SP offline (OSM)"
+            git push origin HEAD:main
+          else
+            echo "Base sem alteracoes"
+          fi
