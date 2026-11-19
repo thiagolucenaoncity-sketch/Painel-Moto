@@ -173,6 +173,9 @@ class RoadAlerts(
     // O mapa pode ser explorado longe do GPS: consulta também a área aberta na tela.
     fun fetchAt(lat: Double, lon: Double) {
         if (!active || lat !in -85.0..85.0 || lon !in -180.0..180.0) return
+        // Semáforos têm cache/retry independente da base fixa de radares.
+        // A ausência de download não deve depender do intervalo de recarga dos radares.
+        if (Prefs.getInt(context, "alert_semaforo") == 0) trafficSignals.fetchAt(lat, lon)
         val loc = Location("map").apply { latitude = lat; longitude = lon }
         val now = System.currentTimeMillis()
         val previousCenter = attemptedCenter
