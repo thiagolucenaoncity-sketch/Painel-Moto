@@ -22,6 +22,7 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
     private val points = LinkedHashMap<String, Signal>()
     private var fetching = false
     private var lastFetchMs = 0L
+    private var lastFetchSucceeded = false
     private var lastLat = 0.0
     private var lastLon = 0.0
     private var active = true
@@ -55,15 +56,16 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
         if (!active || fetching || lat !in -85.0..85.0 || lon !in -180.0..180.0) return
         val now = System.currentTimeMillis()
         val moved = kotlin.math.abs(lat - lastLat) + kotlin.math.abs(lon - lastLon) > 0.016
-        if (lastFetchMs != 0L && now - lastFetchMs < 10 * 60 * 1000L && !moved) return
-        if (lastFetchMs != 0L && now - lastFetchMs < 30000L) return
+        if (lastFetchMs != 0L && now - lastFetchMs < 10 * 60 * 1000L && lastFetchSucceeded && !moved) return
+        // Evita repetição incessante em túneis/sem sinal e tenta novamente após 2 min.
+        if (lastFetchMs != 0L && now - lastFetchMs < (if (lastFetchSucceeded) 30000L else 120000L)) return
         fetching = true
         lastFetchMs = now
         lastLat = lat
         lastLon = lon
         Thread {
             try {
-                val query = "[out:json][timeout:20];node(around:3200,$lat,$lon)[\"highway\"=\"traffic_signals\"];out body;"
+                val query = "[out:json][timeout:18];node(around:2300,$lat,$lon)[\"highway\"=\"traffic_signals\"];out body;"
                 val endpoints = listOf(
                     "https://overpass.private.coffee/api/interpreter",
                     "https://overpass-api.de/api/interpreter"
@@ -71,12 +73,17 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                 var incoming: List<Signal>? = null
                 for (endpoint in endpoints) {
                     try {
-                        val conn = URL(endpoint + "?data=" + URLEncoder.encode(query, "UTF-8")).openConnection() as HttpURLConnection
+                        val conn = URL(endpoint).openConnection() as HttpURLConnection
                         try {
-                            conn.connectTimeout = 7000
-                            conn.readTimeout = 16000
+                            conn.requestMethod = "POST"
+                            conn.doOutput = true
+                            conn.connectTimeout = 8000
+                            conn.readTimeout = 20000
+                            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                             conn.setRequestProperty("Accept", "application/json")
-                            conn.setRequestProperty("User-Agent", "RAVO/1.1 (OpenStreetMap traffic signal overlay)")
+                            conn.setRequestProperty("User-Agent", "RAVO-Android/1.1 (OSM traffic signals)")
+                            val payload = "data=" + URLEncoder.encode(query, "UTF-8")
+                            conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                             if (conn.responseCode !in 200..299) continue
                             val data = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
                             val arr = data.getJSONArray("elements")
@@ -94,6 +101,7 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                     } catch (_: Exception) { /* Usa o outro servidor. */ }
                 }
                 if (incoming != null) {
+                    lastFetchSucceeded = true
                     handler.post {
                         if (!active) return@post
                         var added = 0
@@ -113,7 +121,11 @@ class TrafficSignalSource(private val context: Context, private val changed: () 
                             }.start()
                         }
                     }
+                } else {
+                    lastFetchSucceeded = false
                 }
+            } catch (_: Exception) {
+                lastFetchSucceeded = false
             } finally {
                 handler.post { fetching = false }
             }
