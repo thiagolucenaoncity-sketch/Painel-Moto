@@ -446,6 +446,10 @@ class MainActivity : Activity() {
     private var mapToolsExpanded = false
     private lateinit var panelNightBtn: Button
     private lateinit var panelVoiceBtn: Button
+    private lateinit var panelTiltBtn: Button
+    private lateinit var panelToolsColumn: LinearLayout
+    private lateinit var panelToolsMenuBtn: Button
+    private var panelToolsExpanded = false
     private lateinit var cancelBtn: Button
 
     // Trips salvas
@@ -2223,6 +2227,11 @@ class MainActivity : Activity() {
         mapTiltBtn.text = modeLabel()
         mapTiltBtn.contentDescription = "Alternar mapa para ${modeLabel()}"
         mapTiltBtn.setTextColor(accent)
+        if (::panelTiltBtn.isInitialized) {
+            panelTiltBtn.text = modeLabel()
+            panelTiltBtn.contentDescription = "Alternar mapa para ${modeLabel()}"
+            panelTiltBtn.setTextColor(accent)
+        }
         cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
@@ -2556,7 +2565,8 @@ class MainActivity : Activity() {
             bottomMargin = px(10)
         })
 
-        // Voz e modo noturno um abaixo do outro, no alto à direita do minimapa.
+        // O minimapa agora tem menu retratil com os quatro controles, igual
+        // ao mapa completo. Fechado, sobra mais espaço limpo para a via.
         panelNightBtn = floatBtn("☾") { toggleNightOnPanel() }.apply {
             textSize = 23f
             contentDescription = "Alternar modo noturno"
@@ -2564,13 +2574,50 @@ class MainActivity : Activity() {
         panelVoiceBtn = floatBtn("") { toggleVoice() }.apply {
             contentDescription = "Alternar instruções de voz"
         }
+        panelTiltBtn = floatBtn(modeLabel()) { toggle3D() }.apply {
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 15f
+            contentDescription = "Alternar mapa para ${modeLabel()}"
+        }
+        val panelRotateBtn = floatBtn("") {
+            orientMode = (orientMode + 1) % 3
+            applyOrientation()
+        }.apply {
+            panelIcon(R.drawable.ravo_panel_orientation, Color.WHITE, 22)
+            contentDescription = "Orientação: " + orientLabel()
+        }
+        panelToolsColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            visibility = if (panelToolsExpanded) View.VISIBLE else View.GONE
+            addView(panelTiltBtn, LinearLayout.LayoutParams(px(44), px(44)).apply {
+                topMargin = px(8)
+            })
+            addView(panelRotateBtn, LinearLayout.LayoutParams(px(44), px(44)).apply {
+                topMargin = px(8)
+            })
+            addView(panelNightBtn, LinearLayout.LayoutParams(px(44), px(44)).apply {
+                topMargin = px(8)
+            })
+            addView(panelVoiceBtn, LinearLayout.LayoutParams(px(44), px(44)).apply {
+                topMargin = px(8)
+            })
+        }
+        panelToolsMenuBtn = floatBtn(if (panelToolsExpanded) "✕" else "☰") {
+            panelToolsExpanded = !panelToolsExpanded
+            panelToolsColumn.visibility = if (panelToolsExpanded) View.VISIBLE else View.GONE
+            panelToolsMenuBtn.text = if (panelToolsExpanded) "✕" else "☰"
+            panelToolsMenuBtn.contentDescription = if (panelToolsExpanded)
+                "Fechar controles do minimapa" else "Abrir controles do minimapa"
+        }.apply {
+            textSize = 24f
+            contentDescription = "Abrir controles do minimapa"
+        }
         val miniTools = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
-            addView(panelNightBtn, LinearLayout.LayoutParams(px(46), px(46)))
-            addView(panelVoiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply {
-                topMargin = px(9)
-            })
+            addView(panelToolsMenuBtn, LinearLayout.LayoutParams(px(48), px(48)))
+            addView(panelToolsColumn, LinearLayout.LayoutParams(WRAP, WRAP))
         }
         arcBlock.addView(miniTools, FrameLayout.LayoutParams(WRAP, WRAP,
             Gravity.TOP or Gravity.END).apply {
@@ -2724,49 +2771,56 @@ class MainActivity : Activity() {
             topMargin = px(8)
         })
 
-        // Botões pequenos: mapa, trips salvas, configurações, 2D/3D e rotação
-        val mapBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_menu_map) }
-        mapBtn.setOnClickListener { setScreen(1) }
-        val tripsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_trips) }
-        tripsBtn.setOnClickListener { setScreen(2) }
-        val settingsBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_settings) }
-        settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        val mode3dBtn = miniBtn(modeLabel()).apply { typeface = Typeface.DEFAULT_BOLD; setTextColor(accent) }
-        modeBtns.add(mode3dBtn)
-        mode3dBtn.setOnClickListener { toggle3D() }
-        val rotateBtn = miniBtn("").apply { panelIcon(R.drawable.ravo_panel_orientation); contentDescription = "Orientação da tela" }
-        rotateBtn.setOnClickListener {
-            orientMode = (orientMode + 1) % 3
-            applyOrientation()
-            rotateBtn.contentDescription = "Orientação: " + orientLabel()
+        // Configurações na linha do nome/modelo, no canto superior direito.
+        // Mapa e trips salvas passam para o rodapé, acima dos dados da trip.
+        val mapBtn = miniBtn("").apply {
+            panelIcon(R.drawable.ravo_menu_map, accent, 25)
+            contentDescription = "Abrir mapa completo"
         }
+        mapBtn.setOnClickListener { setScreen(1) }
+        val tripsBtn = miniBtn("").apply {
+            panelIcon(R.drawable.ravo_panel_trips, accent, 25)
+            contentDescription = "Abrir trips salvas"
+        }
+        tripsBtn.setOnClickListener { setScreen(2) }
+        val settingsBtn = miniBtn("").apply {
+            panelIcon(R.drawable.ravo_panel_settings, accent, 25)
+            contentDescription = "Abrir configurações"
+        }
+        settingsBtn.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        val vehicleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(px(48), px(48)))
+            addView(vehicleView, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(48)))
+        }
+        // Dois acessos separados para evitar toque errado ao pilotar.
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mapBtn, LinearLayout.LayoutParams(px(58), px(48)))
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, px(1), 1f))
+            addView(tripsBtn, LinearLayout.LayoutParams(px(58), px(48)))
         }
-        navRow.addView(mapBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
-        navRow.addView(tripsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
-        navRow.addView(settingsBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
-        navRow.addView(mode3dBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
-        navRow.addView(rotateBtn, LinearLayout.LayoutParams(px(48), px(44)).apply { setMargins(px(3), 0, px(3), 0) })
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
         if (landscape) {
-            // Paisagem: mapa maior à esquerda, dados empilhados à direita (ocupam a altura toda)
+            // Na horizontal preserva o painel lado a lado, mas mantém o menu
+            // sobre o mapa e mapa/trips salvas antes dos dados de viagem.
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
             left.addView(panelEtaCard, gap(6))
-            left.addView(vehicleView, gap(0))
+            left.addView(vehicleRow, gap(0))
             left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             right.addView(navView, gap(0))
-            right.addView(tripHeader, gap(4))
+            right.addView(navRow, gap(6))
+            right.addView(tripHeader, gap(6))
             right.addView(statsBox, gap(4))
             right.addView(tripRow, gap(8))
-            right.addView(navRow, gap(10))
-
             val scroll = ScrollView(this).apply {
                 isFillViewport = true
                 addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -2774,16 +2828,18 @@ class MainActivity : Activity() {
             root.addView(left, LinearLayout.LayoutParams(0, MATCH, 1.8f))
             root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(12) })
         } else {
-            // Retrato: o player fica só no botão flutuante, por isso não entra aqui
+            // Retrato: a viagem fica no rodapé. A remoção dos cinco botões
+            // inferiores libera altura para ampliar o minimapa e centralizar
+            // os números do velocímetro no mapa maior.
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(panelEtaCard, gap(6))
-            root.addView(vehicleView, gap(0))
-            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1.4f))
+            root.addView(panelEtaCard, gap(4))
+            root.addView(vehicleRow, gap(0))
+            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
             root.addView(navView, gap(4))
-            root.addView(tripHeader, gap(8))
-            root.addView(statsBox, gap(4))
-            root.addView(tripRow, gap(8))
-            root.addView(navRow, gap(10))
+            root.addView(navRow, gap(6))
+            root.addView(tripHeader, gap(3))
+            root.addView(statsBox, gap(3))
+            root.addView(tripRow, gap(6))
         }
         return root
     }
