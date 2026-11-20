@@ -1708,6 +1708,8 @@ class MainActivity : Activity() {
         s.addLayer(
             SymbolLayer("me-layer", "me-src").withProperties(
                 PropertyFactory.iconImage("me-icon"),
+                // Reduz o marcador em retrato e paisagem sem trocar o modelo selecionado.
+                PropertyFactory.iconSize(0.76f),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
                 PropertyFactory.iconRotate(Expression.get("screenBearing")),
@@ -1787,15 +1789,13 @@ class MainActivity : Activity() {
             .zoom(zoom)
             .tilt(if (is3D) 60.0 else 0.0)
             .bearing(bearing)
-            // Camera de navegacao: moto mais baixa no mapa completo e
-            // proxima ao rodape do minimapa, deixando a via adiante visivel.
-            // Na paisagem o rodapé ocupa proporcionalmente mais da tela:
-            // elevar a moto acima dos controles sem alterar o retrato.
+            // Mantém o marcador no limite inferior seguro do mapa nas duas orientações.
+            // No mapa completo deixa margem extra para os controles flutuantes.
             .padding(0.0, viewHeight * when {
-                landscape && h.interactive -> 0.32
-                landscape -> 0.52
-                h.interactive -> 0.73
-                else -> 0.67
+                h.interactive && landscape -> 0.73
+                h.interactive -> 0.74
+                landscape -> 0.82
+                else -> 0.82
             }, 0.0, 0.0)
             .build()
         if (animate) {
@@ -3438,7 +3438,6 @@ class MainActivity : Activity() {
             // inferiores libera altura para ampliar o minimapa e centralizar
             // os números do velocímetro no mapa maior.
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(panelEtaCard, gap(4))
             root.addView(vehicleRow, gap(0))
             // Retrato: faixa flutuante no mapa, velocímetro imediatamente
             // abaixo dela e acessos mapa/trips fora do cartão de navegação.
@@ -3449,6 +3448,8 @@ class MainActivity : Activity() {
                     topMargin = px(5)
                 })
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            // ETA abaixo do mapa, como na referência aprovada para retrato.
+            root.addView(panelEtaCard, gap(4))
             root.addView(navRow, gap(4))
             root.addView(tripHeader, gap(2))
             root.addView(statsBox, gap(2))
