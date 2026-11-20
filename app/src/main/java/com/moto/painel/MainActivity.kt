@@ -196,6 +196,9 @@ class SpeedArcView(ctx: Context) : View(ctx) {
     private var lim2 = 120
     private var style = 0
     private var scaleMax = 200f
+    // Visual circular do painel RAVO em paisagem (somente estilo padrão).
+    private var dashboardLook = false
+    private var dashboardAccent = 0xFFFF9800.toInt()
 
     private val rect = RectF()
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -223,6 +226,12 @@ class SpeedArcView(ctx: Context) : View(ctx) {
         invalidate()
     }
 
+    fun setDashboardLook(enabled: Boolean, accentColor: Int) {
+        dashboardLook = enabled
+        dashboardAccent = accentColor
+        invalidate()
+    }
+
     fun setZones(color1: Int, color2: Int, color3: Int, limit1: Int, limit2: Int, track: Int) {
         c1 = color1
         c2 = color2
@@ -237,6 +246,41 @@ class SpeedArcView(ctx: Context) : View(ctx) {
         super.onDraw(canvas)
         if (width == 0 || height == 0) return
         val frac = (speed / scaleMax).coerceIn(0f, 1f)
+        if (dashboardLook) {
+            // Mostrador central escuro, aro duplo luminoso e progresso na cor do tema.
+            val diameter = minOf(width, height).toFloat()
+            val centerX = width / 2f
+            val centerY = height / 2f
+            val radius = diameter * 0.445f
+            val facePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                color = 0xEB061326.toInt()
+            }
+            canvas.drawCircle(centerX, centerY, radius, facePaint)
+            val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = context.pxF(2.5f)
+                color = dashboardAccent
+                setShadowLayer(context.pxF(7f), 0f, 0f, dashboardAccent)
+            }
+            canvas.drawCircle(centerX, centerY, radius, rimPaint)
+            val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = context.pxF(1f)
+                color = 0x775E80A5
+            }
+            canvas.drawCircle(centerX, centerY, radius * 0.81f, innerPaint)
+            val ringRadius = radius * 0.88f
+            rect.set(centerX - ringRadius, centerY - ringRadius,
+                centerX + ringRadius, centerY + ringRadius)
+            trackPaint.strokeWidth = context.pxF(7f)
+            trackPaint.color = 0xFF34445C.toInt()
+            arcPaint.strokeWidth = context.pxF(7f)
+            arcPaint.color = dashboardAccent
+            canvas.drawArc(rect, 135f, 270f, false, trackPaint)
+            if (frac > 0f) canvas.drawArc(rect, 135f, 270f * frac, false, arcPaint)
+            return
+        }
         arcPaint.color = when {
             speed <= lim1 -> c1
             speed <= lim2 -> c2
@@ -2849,9 +2893,11 @@ class MainActivity : Activity() {
         }
         arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1 || gaugeStyle == 5
+        val ravoGauge = landscape && gaugeStyle == 0
+        arcView.setDashboardLook(ravoGauge, accent)
         speedView = label(
             if (digital) (if (landscape) 44f else 120f)
-            else (if (landscape) 31f else 84f),
+            else (if (ravoGauge) 49f else if (landscape) 31f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2864,7 +2910,7 @@ class MainActivity : Activity() {
                 setShadowLayer(pxF(7f), 0f, 0f, accent)
             }
         }
-        unitView = label(if (landscape) 10f else 16f,
+        unitView = label(if (ravoGauge) 14f else if (landscape) 10f else 16f,
             cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2877,19 +2923,18 @@ class MainActivity : Activity() {
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, if (landscape) {
-                FrameLayout.LayoutParams(px(122), px(122),
-                    Gravity.TOP or Gravity.END).apply {
-                    topMargin = px(57)
-                    // Deixa a faixa de ferramentas livre à direita,
-                    // inclusive quando o menu está expandido.
-                    rightMargin = px(54)
+                FrameLayout.LayoutParams(px(if (ravoGauge) 164 else 122),
+                    px(if (ravoGauge) 164 else 122),
+                    if (ravoGauge) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(if (ravoGauge) 108 else 57)
+                    if (ravoGauge) leftMargin = px(8) else rightMargin = px(54)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, if (landscape) {
-                FrameLayout.LayoutParams(px(126), WRAP,
-                    Gravity.TOP or Gravity.END).apply {
-                    topMargin = px(if (digital) 69 else 84)
-                    rightMargin = px(52)
+                FrameLayout.LayoutParams(px(if (ravoGauge) 164 else 126), WRAP,
+                    if (ravoGauge) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(if (ravoGauge) 141 else if (digital) 69 else 84)
+                    if (ravoGauge) leftMargin = px(8) else rightMargin = px(52)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
