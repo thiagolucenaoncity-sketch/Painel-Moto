@@ -94,6 +94,26 @@ class SettingsActivity : Activity() {
             add(col, menuBtn("Abertura do app", R.drawable.ravo_menu_play) { go("abertura") }, 10)
             add(col, menuBtn("Unidades", R.drawable.ravo_menu_ruler) { go("unidades") }, 10)
             add(col, menuBtn("Veículo", R.drawable.ravo_menu_bike) { go("veiculo") }, 10)
+            add(col, plainBtn(
+                if (Diagnostics.enabled(this)) "Diagnóstico: LIGADO (toque para desligar)"
+                else "Diagnóstico: DESLIGADO (toque para ativar)"
+            ) {
+                Diagnostics.setEnabled(this, !Diagnostics.enabled(this))
+                go(null)
+            }, 14)
+            add(col, plainBtn("Compartilhar relatório de diagnóstico") {
+                val report = Diagnostics.exportFile(this).readText().takeLast(120000)
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "RAVO - relatório de diagnóstico")
+                    putExtra(Intent.EXTRA_TEXT, report)
+                }
+                startActivity(Intent.createChooser(send, "Compartilhar diagnóstico do RAVO"))
+            }, 8)
+            add(col, plainBtn("Apagar dados de diagnóstico") {
+                Diagnostics.clear(this)
+                Toast.makeText(this, "Relatórios locais apagados", Toast.LENGTH_SHORT).show()
+            }, 8)
             add(col, plainBtn("Verificar atualização do RAVO") {
                 ravoUpdater.checkNow(force = true)
             }, 18)
