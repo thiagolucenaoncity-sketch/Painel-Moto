@@ -460,6 +460,8 @@ class MainActivity : Activity() {
     private lateinit var panelEtaCard: RouteEtaCard
     // Overlay de manobra: sem rota não deve cobrir a área útil do minimapa.
     private var panelManeuverOverlay: LinearLayout? = null
+    private var dashboardGaugeText: LinearLayout? = null
+    private var dashboardGaugeLayout = false
     private lateinit var minimap: MapView
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
@@ -2597,9 +2599,31 @@ class MainActivity : Activity() {
         // ao iniciar, restaura apenas a instrução realmente disponível.
         panelManeuverOverlay?.visibility = if (hasRoute() && navView.text.isNotBlank())
             View.VISIBLE else View.GONE
+        updateDashboardGaugePosition()
         // Ao mudar rota/instrução, os controles seguem a altura real do topo.
         musicDock.post { applyFabLayout() }
         if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
+    }
+
+    // O velocímetro ocupa o canto superior esquerdo, deslocando-se para
+    // baixo da faixa de manobra somente durante navegação ativa.
+    private fun updateDashboardGaugePosition() {
+        if (!dashboardGaugeLayout || !::arcView.isInitialized) return
+        val gaugeText = dashboardGaugeText ?: return
+        val portrait = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        val navigating = panelManeuverOverlay?.visibility == View.VISIBLE
+        val gaugeTop = px(if (navigating) (if (portrait) 98 else 88) else 10)
+        val arcParams = arcView.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (arcParams.topMargin != gaugeTop) {
+            arcParams.topMargin = gaugeTop
+            arcView.layoutParams = arcParams
+        }
+        val textParams = gaugeText.layoutParams as? FrameLayout.LayoutParams ?: return
+        val textTop = gaugeTop + px(if (portrait) 31 else 33)
+        if (textParams.topMargin != textTop) {
+            textParams.topMargin = textTop
+            gaugeText.layoutParams = textParams
+        }
     }
 
     // Traduz a manobra do OSRM para uma frase em português
@@ -2893,11 +2917,13 @@ class MainActivity : Activity() {
         }
         arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1 || gaugeStyle == 5
-        val ravoGauge = landscape && gaugeStyle == 0
+        // O visual de referência também é aplicado no retrato.
+        val ravoGauge = gaugeStyle == 0
+        dashboardGaugeLayout = ravoGauge
         arcView.setDashboardLook(ravoGauge, accent)
         speedView = label(
             if (digital) (if (landscape) 44f else 120f)
-            else (if (ravoGauge) 49f else if (landscape) 31f else 84f),
+            else (if (ravoGauge) (if (landscape) 49f else 43f) else if (landscape) 31f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2916,25 +2942,34 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = if (landscape) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
             // Paisagem: leitura quase no alto do minimapa; retrato restaurado.
-            translationY = if (landscape) 0f else -pxF(65f)
+            translationY = if (ravoGauge) 0f else if (landscape) 0f else -pxF(65f)
             addView(speedView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(unitView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(arcView, if (landscape) {
-                FrameLayout.LayoutParams(px(if (ravoGauge) 164 else 122),
-                    px(if (ravoGauge) 164 else 122),
-                    if (ravoGauge) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END).apply {
-                    topMargin = px(if (ravoGauge) 108 else 57)
-                    if (ravoGauge) leftMargin = px(8) else rightMargin = px(54)
+            addView(arcView, if (ravoGauge) {
+                val size = px(if (landscape) 164 else 146)
+                FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.START).apply {
+                    leftMargin = px(8)
+                    topMargin = px(10)
+                }
+            } else if (landscape) {
+                FrameLayout.LayoutParams(px(122), px(122), Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(57)
+                    rightMargin = px(54)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(centerCol, if (landscape) {
-                FrameLayout.LayoutParams(px(if (ravoGauge) 164 else 126), WRAP,
-                    if (ravoGauge) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END).apply {
-                    topMargin = px(if (ravoGauge) 141 else if (digital) 69 else 84)
-                    if (ravoGauge) leftMargin = px(8) else rightMargin = px(52)
+            addView(centerCol, if (ravoGauge) {
+                val size = px(if (landscape) 164 else 146)
+                FrameLayout.LayoutParams(size, WRAP, Gravity.TOP or Gravity.START).apply {
+                    topMargin = px(if (landscape) 43 else 41)
+                    leftMargin = px(8)
+                }
+            } else if (landscape) {
+                FrameLayout.LayoutParams(px(126), WRAP, Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(if (digital) 69 else 84)
+                    rightMargin = px(52)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
@@ -2945,6 +2980,8 @@ class MainActivity : Activity() {
                     leftMargin = px(8)
                 })
         }
+
+        dashboardGaugeText = centerCol
 
         // Tela inicial: alvo de centralização no mesmo canto, um pouco menor.
         val miniCenterBtn = modernRecenterButton()
@@ -3236,7 +3273,8 @@ class MainActivity : Activity() {
         // Dois acessos separados para evitar toque errado ao pilotar.
         // Instrução da rota centralizada ENTRE os acessos ao mapa e trips.
         navView.setAutoSizeTextTypeUniformWithConfiguration(
-            10, 12, 1, TypedValue.COMPLEX_UNIT_SP
+            if (landscape) 13 else 12, if (landscape) 19 else 17,
+            1, TypedValue.COMPLEX_UNIT_SP
         )
         val miniNavText = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -3247,13 +3285,21 @@ class MainActivity : Activity() {
         val miniManeuver = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(panelManeuverIcon, LinearLayout.LayoutParams(px(32), px(32)).apply {
-                rightMargin = px(4)
+            addView(panelManeuverIcon, LinearLayout.LayoutParams(
+                px(if (landscape) 58 else 46), px(if (landscape) 58 else 46)).apply {
+                rightMargin = px(9)
             })
             addView(miniNavText, LinearLayout.LayoutParams(0, WRAP, 1f))
         }
         panelManeuverOverlay = miniManeuver
         miniManeuver.visibility = View.GONE
+        miniManeuver.background = box(this, 0xF0061427.toInt(), 18, accent)
+        miniManeuver.elevation = pxF(6f)
+        navView.setTextColor(Color.WHITE)
+        panelManeuverDistance.setTextColor(accent)
+        navView.textSize = if (landscape) 18f else 16f
+        panelManeuverDistance.textSize = if (landscape) 19f else 16f
+        miniManeuver.setPadding(px(12), px(6), px(12), px(6))
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -3261,10 +3307,7 @@ class MainActivity : Activity() {
             val w = px(if (landscape) 36 else 44)
             if (!landscape) {
                 addView(mapBtn, LinearLayout.LayoutParams(w, h))
-                addView(miniManeuver, LinearLayout.LayoutParams(0, h, 1f).apply {
-                    leftMargin = px(6)
-                    rightMargin = px(6)
-                })
+                addView(View(this@MainActivity), LinearLayout.LayoutParams(0, h, 1f))
                 addView(tripsBtn, LinearLayout.LayoutParams(w, h))
             }
         }
@@ -3315,15 +3358,12 @@ class MainActivity : Activity() {
             })
             // Instrução da próxima manobra SOBRE o mapa, alinhada à
             // faixa horizontal do botão menu, e sem consumir altura abaixo.
-            navView.textSize = 12f
-            panelManeuverDistance.textSize = 12f
-            miniManeuver.setPadding(px(6), px(2), px(4), px(2))
             arcBlock.addView(miniManeuver,
-                FrameLayout.LayoutParams(MATCH, px(43),
+                FrameLayout.LayoutParams(MATCH, px(75),
                     Gravity.TOP or Gravity.START).apply {
-                    leftMargin = px(5)
-                    rightMargin = px(194)
-                    topMargin = px(4)
+                    leftMargin = px(6)
+                    rightMargin = px(58)
+                    topMargin = px(5)
                 })
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
@@ -3400,6 +3440,14 @@ class MainActivity : Activity() {
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
             root.addView(panelEtaCard, gap(4))
             root.addView(vehicleRow, gap(0))
+            // Retrato: faixa flutuante no mapa, velocímetro imediatamente
+            // abaixo dela e acessos mapa/trips fora do cartão de navegação.
+            arcBlock.addView(miniManeuver,
+                FrameLayout.LayoutParams(MATCH, px(83), Gravity.TOP or Gravity.START).apply {
+                    leftMargin = px(7)
+                    rightMargin = px(7)
+                    topMargin = px(5)
+                })
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
             root.addView(navRow, gap(4))
             root.addView(tripHeader, gap(2))
