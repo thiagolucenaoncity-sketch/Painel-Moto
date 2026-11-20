@@ -1081,7 +1081,13 @@ class MainActivity : Activity() {
     // Atualiza os textos dos botões e o status da trip
     private fun updateTripButtons() {
         if (!::tripBtn.isInitialized) return
-        tripBtn.text = if (tripStarted) "■ Finalizar" else "▶ Iniciar"
+        val portrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        tripBtn.text = when {
+            portrait && tripStarted -> "Finalizar"
+            portrait -> "Iniciar"
+            tripStarted -> "■ Finalizar"
+            else -> "▶ Iniciar"
+        }
         pauseBtn.visibility = if (tripStarted) View.VISIBLE else View.GONE
         pauseBtn.text = if (isRunning()) "⏸" else "▶"
         tripHeader.text = when {
@@ -2792,12 +2798,12 @@ class MainActivity : Activity() {
         }
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
-        nickView = label(if (landscape) 15f else 20f,
+        nickView = label(if (landscape) 15f else 17f,
             accent, bold = true, align = Gravity.CENTER).apply {
             text = nick
             visibility = if (nick.isEmpty()) View.GONE else View.VISIBLE
         }
-        modelView = label(if (landscape) 10f else 12f, cLabel, align = Gravity.CENTER).apply {
+        modelView = label(if (landscape) 10f else 11f, cLabel, align = Gravity.CENTER).apply {
             text = brandModel
             visibility = if (brandModel.isEmpty()) View.GONE else View.VISIBLE
         }
@@ -2822,7 +2828,8 @@ class MainActivity : Activity() {
         arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1 || gaugeStyle == 5
         speedView = label(
-            if (digital) (if (landscape) 60f else 120f) else (if (landscape) 40f else 84f),
+            if (digital) (if (landscape) 60f else 82f)
+            else (if (landscape) 40f else 55f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2835,24 +2842,34 @@ class MainActivity : Activity() {
                 setShadowLayer(pxF(7f), 0f, 0f, accent)
             }
         }
-        unitView = label(if (landscape) 12f else 16f,
+        unitView = label(if (landscape) 12f else 13f,
             cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            // O mapa ganha altura e a velocidade sobe para deixar a moto livre abaixo.
-            translationY = -pxF(if (landscape) 25f else 65f)
+            gravity = if (landscape) Gravity.CENTER else Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            // No retrato, a velocidade fica a poucos dp do alto do minimapa,
+            // em vez de deslocar uma coluna que preenche toda a tela.
+            translationY = if (landscape) -pxF(25f) else 0f
             addView(speedView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(unitView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
-            // O arco anterior de 225dp ainda dominava o minimapa em
-            // paisagem (ver captura do aparelho). Reduzido para 174dp.
+            // Arco e valores agora ficam no topo do mapa retrato.
+            // Paisagem mantém suas dimensões e posição anteriores.
             addView(arcView, if (landscape) {
                 FrameLayout.LayoutParams(px(174), px(174), Gravity.CENTER)
-            } else FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
+            } else FrameLayout.LayoutParams(
+                px(185), px(185), Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply { topMargin = px(10) })
+            addView(centerCol, if (landscape) {
+                FrameLayout.LayoutParams(MATCH, MATCH)
+            } else {
+                FrameLayout.LayoutParams(MATCH, WRAP,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    topMargin = px(if (digital) 12 else 39)
+                }
+            })
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
             // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
