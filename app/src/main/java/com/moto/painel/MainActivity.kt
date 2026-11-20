@@ -304,6 +304,10 @@ class EqualizerView(ctx: Context) : View(ctx) {
 class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
+    // MapView precisa receber exatamente os eventos reais de Activity.
+    // Não iniciar dois renderizadores juntos nem duplicar onStart/onResume.
+    private var activityStarted = false
+    private var activityResumed = false
     private var isConnected: Boolean? = null
     private var offlineNotice: TextView? = null
     private var lastRoadDataCheckMs = 0L
@@ -577,6 +581,14 @@ class MainActivity : Activity() {
     private var lastRecalcMs = 0L
     private var recalculating = false
 
+    // Geometrias de rota podem ter milhares de segmentos. Nunca projetar
+    // três vezes a rota inteira em cada callback de GPS na thread principal.
+    private var lastGeometryTickMs = 0L
+    private var lastRoadSnapMs = 0L
+    private var lastInstructionRefreshMs = 0L
+    private var lastRouteOffDistanceM = 0.0
+    private var lastRouteProgress: RouteEtaCalculator.Projection? = null
+
     // Trip (distância em metros, tempo em ms, máxima em km/h)
     private var tripStarted = false
     private var manualPaused = false
@@ -669,7 +681,17 @@ class MainActivity : Activity() {
             tripLast = loc
             updateStableHeading(loc)
             lastFix = loc
-            mapFix = mapDisplayLocation(loc)
+            val currentMs = android.os.SystemClock.elapsedRealtime()
+            // A UI continua recebendo GPS a cada leitura, mas a busca
+            // geometrica de centenas/milhares de pontos fica limitada.
+            if (currentMs - lastRoadSnapMs >= 2500L || mapFix == null) {
+                mapFix = mapDisplayLocation(loc)
+                lastRoadSnapMs = currentMs
+            } else {
+                // Nao manter o marcador congelado no ponto antigo.
+                // Entre duas correcoes de via, usa a medicao atual do GPS.
+                mapFix = loc
+            }
             roadAlerts.onLocation(loc)
             roadSpeedSource.onLocation(loc)
 
@@ -686,8 +708,21 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, mapFix ?: loc, false) }
             }
             holders.forEach { updateMeMarker(it, mapFix ?: loc) }
-            updateEtaFromGps(loc)
-            onFix(loc)
+            // ETA e detecção de saída da rota compartilham UMA projeção,
+            // no máximo a cada 2,5 segundos. Velocidade e moto continuam
+            // a ser atualizadas em cada posição recebida.
+            if (currentMs - lastGeometryTickMs >= 2500L) {
+                lastGeometryTickMs = currentMs
+                if (hasRoute() && routePoints.size > 1) {
+                    val projected = etaProfile?.let {
+                        RouteEtaCalculator.project(it, loc.latitude, loc.longitude)
+                    }
+                    lastRouteProgress = projected
+                    if (projected != null) lastRouteOffDistanceM = projected.offRouteMeters
+                    updateEtaFromGps(loc, projected)
+                }
+                onFix(loc)
+            }
         }
 
         override fun onProviderEnabled(provider: String) {}
@@ -709,11 +744,11 @@ class MainActivity : Activity() {
         // Evita reenviar o mesmo marcador a cada GPS, causando reprocessamento.
         var lastMarkerPosition: Location? = null
         var lastMarkerScreenBearing = Double.NaN
+        var started = false
+        var resumed = false
 
         init {
             view.onCreate(null)
-            view.onStart()
-            view.onResume()
             view.getMapAsync { m ->
                 map = m
                 m.uiSettings.setAllGesturesEnabled(interactive)
@@ -791,6 +826,7 @@ class MainActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         setContentView(buildUi())
+        syncMapLifecycle()
         updateMedia()
     }
 
@@ -802,33 +838,69 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun syncMapLifecycle() {
+        for (h in holders) {
+            if (activityStarted && !h.started) {
+                h.view.onStart()
+                h.started = true
+            }
+            // Apenas o mapa visível continua com o renderizador ativo.
+            // Isso reduz GPU, memória e trabalho em segundo plano.
+            val shouldResume = activityResumed &&
+                (if (h.interactive) screenMode == 1 else screenMode == 0)
+            if (shouldResume && !h.resumed) {
+                h.view.onResume()
+                h.resumed = true
+            } else if (!shouldResume && h.resumed) {
+                h.view.onPause()
+                h.resumed = false
+            }
+        }
+    }
+
     override fun onStart() {
         super.onStart()
-        holders.forEach { it.view.onStart() }
+        activityStarted = true
+        syncMapLifecycle()
     }
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         // Se mudou alguma configuração na tela de Configurações, redesenha a tela principal
         if (Prefs.version(this) != appliedVer) {
             setContentView(buildUi())
             updateMedia()
         }
-        holders.forEach { it.view.onResume() }
+        syncMapLifecycle()
         updateConnection()
+        handler.removeCallbacks(tick)
+        handler.removeCallbacks(pollSessions)
+        handler.removeCallbacks(eqTick)
         handler.post(tick)
         handler.post(pollSessions)
         handler.post(eqTick)
     }
 
     override fun onPause() {
-        super.onPause()
-        holders.forEach { it.view.onPause() }
+        activityResumed = false
+        syncMapLifecycle()
         handler.removeCallbacksAndMessages(null)
+        super.onPause()
     }
 
     override fun onStop() {
-        holders.forEach { it.view.onStop() }
+        activityStarted = false
+        holders.forEach {
+            if (it.resumed) {
+                it.view.onPause()
+                it.resumed = false
+            }
+            if (it.started) {
+                it.view.onStop()
+                it.started = false
+            }
+        }
         super.onStop()
     }
 
@@ -844,8 +916,8 @@ class MainActivity : Activity() {
 
     private fun destroyHolders() {
         holders.forEach {
-            it.view.onPause()
-            it.view.onStop()
+            if (it.resumed) it.view.onPause()
+            if (it.started) it.view.onStop()
             it.view.onDestroy()
         }
         holders.clear()
@@ -1935,6 +2007,8 @@ class MainActivity : Activity() {
 
     private fun setScreen(mode: Int) {
         screenMode = mode
+        // Suspende o mapa que ficou oculto, mas mantém o GPS ativo.
+        syncMapLifecycle()
         panelScreen.visibility = if (mode == 0) View.VISIBLE else View.GONE
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
@@ -1958,10 +2032,14 @@ class MainActivity : Activity() {
 
     // ---------- Navegação ----------
 
-    private fun updateEtaFromGps(loc: Location) {
+    private fun updateEtaFromGps(
+        loc: Location,
+        cachedProjection: RouteEtaCalculator.Projection? = null
+    ) {
         val profile = etaProfile ?: return
         if (!etaActive || (loc.hasAccuracy() && loc.accuracy > 65f)) return
-        val projection = RouteEtaCalculator.project(profile, loc.latitude, loc.longitude) ?: return
+        val projection = cachedProjection
+            ?: RouteEtaCalculator.project(profile, loc.latitude, loc.longitude) ?: return
         // Fora da via: mantem a ultima previsao ate a rota ser recalculada.
         if (projection.offRouteMeters > 55.0) return
         // Evita que ruído do GPS faça os quilômetros voltarem a aumentar.
@@ -2001,7 +2079,8 @@ class MainActivity : Activity() {
 
         // Verifica se saiu da rota; se ficou fora por alguns segundos, recalcula
         if (routePoints.size > 1) {
-            val off = distToRouteM(loc.latitude, loc.longitude)
+            // A distância lateral já foi obtida na projeção para o ETA.
+            val off = lastRouteOffDistanceM
             if (off > OFF_ROUTE_M) {
                 offCount++
                 if (offCount >= 3 && !recalculating && System.currentTimeMillis() - lastRecalcMs > 20000) {
@@ -2038,8 +2117,14 @@ class MainActivity : Activity() {
             announcedNear = true
             say("Em ${fmtDist(d)}, ${s.text}")
         }
-        val remaining = d + steps.drop(stepIndex).sumOf { it.distanceM }
-        showInstruction("${s.text} · em ${fmtDist(d)}", "Faltam ${fmtDist(remaining)}")
+        // Reconstruir os textos e relayout do painel a cada GPS fazia
+        // a interface engasgar, principalmente com a rota aberta.
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastInstructionRefreshMs >= 3000L) {
+            lastInstructionRefreshMs = now
+            val remaining = d + steps.drop(stepIndex).sumOf { it.distanceM }
+            showInstruction("${s.text} · em ${fmtDist(d)}", "Faltam ${fmtDist(remaining)}")
+        }
     }
 
     // Menor distância (em metros) entre sua posição e a linha da rota
@@ -2079,12 +2164,23 @@ class MainActivity : Activity() {
 
     // Mostra a instrução no cartão do mapa e na linha de navegação do painel
     private fun showInstruction(main: String, sub: String) {
-        mapInstructionView.text = main
-        mapInfoView.text = sub
-        navView.text = "➜ $main"
-        navView.visibility = if (main.isEmpty()) View.GONE else View.VISIBLE
+        // Os cartões e menus têm listeners de layout. Não reenviar o
+        // mesmo texto, evitando cascatas de layout e atualização de views.
+        val changed = mapInstructionView.text.toString() != main ||
+            mapInfoView.text.toString() != sub
+        if (!changed) return
+        if (mapInstructionView.text.toString() != main) mapInstructionView.text = main
+        if (mapInfoView.text.toString() != sub) mapInfoView.text = sub
+        val nav = "➜ $main"
+        if (navView.text.toString() != nav) navView.text = nav
+        val visible = if (main.isEmpty()) View.GONE else View.VISIBLE
+        if (navView.visibility != visible) navView.visibility = visible
         navView.isSelected = true
-        refreshMapButtons()
+        // Só atualizar botões quando o cartão muda de visibilidade.
+        val shouldShow = hasRoute() && main.isNotEmpty()
+        if (instrCard.visibility != (if (shouldShow) View.VISIBLE else View.GONE)) {
+            refreshMapButtons()
+        }
     }
 
     // Busca a rota (usada na primeira vez e também no recálculo)
@@ -2159,6 +2255,11 @@ class MainActivity : Activity() {
         routeEstimatedMeters = totalM.coerceAtLeast(0.0)
         routeEstimatedSeconds = durS.coerceAtLeast(0.0)
         routeTraveledMeters = 0.0
+        lastRouteProgress = null
+        lastGeometryTickMs = 0L
+        lastRoadSnapMs = 0L
+        lastInstructionRefreshMs = 0L
+        lastRouteOffDistanceM = 0.0
         etaRemainingMeters = routeEstimatedMeters
         etaRemainingSeconds = routeEstimatedSeconds
         lastFix?.let { updateEtaFromGps(it) }
@@ -2172,13 +2273,13 @@ class MainActivity : Activity() {
         holders.forEach { refreshRoute(it) }
         roadAlerts.setRoute(if (list.isNotEmpty()) points else emptyList())
 
-        // Na primeira rota, mostra o trajeto inteiro no mapa grande (para de seguir até tocar em ◎)
+        // A partir do início da navegação, a moto deve acompanhar o GPS.
+        // A versão anterior desativava followMe e deixava o mapa parado.
         if (!isRecalc) {
-            followMe = false
-            val full = holders.firstOrNull { it.interactive }?.map
-            if (full != null && points.size > 1) {
-                val bounds = LatLngBounds.Builder().includes(points).build()
-                full.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+            followMe = true
+            (mapFix ?: lastFix)?.let { position ->
+                holders.filter { it.interactive == (screenMode == 1) }
+                    .forEach { followCamera(it, position, false) }
             }
         }
 
