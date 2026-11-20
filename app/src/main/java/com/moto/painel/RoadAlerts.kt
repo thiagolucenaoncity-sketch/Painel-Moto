@@ -217,12 +217,7 @@ class RoadAlerts(
 
         // Em zoom aberto: próximos radares na rota; aproximando: objetos
         // de rua. Semáforos e lombadas são ocultados primeiro.
-        val maxVisible = when {
-            viewZoom < 13.0 -> 10
-            viewZoom < 15.0 -> 20
-            viewZoom < 17.0 -> 35
-            else -> 65
-        }
+        val maxVisible = AlertVisualPolicy.maxVisible(viewZoom)
         val chosen = hazards.asSequence().mapNotNull { h ->
             when (h.type) {
                 "radar" -> if (!showRadar) return@mapNotNull null
@@ -233,28 +228,7 @@ class RoadAlerts(
             val priority = if (navigationActive) priorities[h.id] ?: "other" else "other"
             // Próximo radar da rota tem prioridade máxima; o restante aparece
             // conforme proximidade e zoom. A distância é calculada em metros.
-            val radius = when (priority) {
-                "next" -> 2200.0
-                "route" -> when (h.type) {
-                    "radar" -> 1500.0
-                    "lombada" -> if (viewZoom >= 15.0) 550.0 else 0.0
-                    else -> if (viewZoom >= 17.0) 400.0 else 0.0
-                }
-                else -> when (h.type) {
-                    "radar" -> when {
-                        viewZoom < 13.0 -> 0.0
-                        viewZoom < 15.0 -> 250.0
-                        viewZoom < 17.0 -> 450.0
-                        else -> 700.0
-                    }
-                    "lombada" -> when {
-                        viewZoom < 16.0 -> 0.0
-                        viewZoom < 18.0 -> 200.0
-                        else -> 350.0
-                    }
-                    else -> if (viewZoom >= 17.0) 260.0 else 0.0
-                }
-            }
+            val radius = AlertVisualPolicy.radiusMeters(h.type, priority, viewZoom)
             if (radius <= 0.0) return@mapNotNull null
             val dx = (h.lon - centerLon) * meterLon
             val dy = (h.lat - centerLat) * 111320.0
@@ -280,7 +254,7 @@ class RoadAlerts(
                 addStringProperty("priority", candidate.priority)
                 // As placas dos outros radares só aparecem bem de perto,
                 // poupando espaço; o próximo radar conserva seu limite.
-                val showPlate = candidate.priority != "other" || viewZoom >= 18.0
+                val showPlate = AlertVisualPolicy.showSpeedSign(candidate.priority, viewZoom)
                 val limit = if (showPlate && h.type == "radar") h.limit.toIntOrNull() else null
                 if (limit != null && limit in 10..140 && limit % 5 == 0) {
                     addStringProperty("speedSign", "ravo-limit-" + limit)
