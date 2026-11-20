@@ -21,3 +21,13 @@ A instrumentação de diagnóstico é experimental. Nas configurações do RAVO,
 
 ## Observações
 Instrumentação não equivale a análise automática pelo ChatGPT; para análise nesta conversa o usuário precisa compartilhar o relatório. Testes de estabilidade e compilação no Android Studio ainda são necessários.
+
+## Teste de estresse de mapas (30 segundos)
+- Entre em **Configurações → Diagnóstico: LIGADO**, depois em **RAVO Maps Lab**.
+- Com o aparelho **parado e fora de qualquer condução**, selecione **Core** ou **Open** e toque em **Iniciar teste de estresse (30s)**.
+- O teste movimenta artificialmente o desenho Core ou a câmera Open. Não altera trajetos reais e não simula/forja coordenadas do GPS.
+- Ao terminar, o evento `stress_result` apresenta `approx_fps`, `p95_frame_ms`, `frames_over_34ms`, `elapsed_ms` e `completed`, além de uma amostra de RAM.
+- Para interromper, toque em **Interromper teste**. O teste também para ao sair da tela.
+- Repita Core e Open sob condições semelhantes para comparar. FPS é estimativa de frequência dos callbacks da UI, não uma medição exata do renderizador/GPU.
+- O modo Original não recebe movimento artificial: ele continua com monitoramento passivo para não interferir na navegação.
+- Para compartilhar: **Configurações → Compartilhar relatório de diagnóstico**. Nenhum envio automático.
