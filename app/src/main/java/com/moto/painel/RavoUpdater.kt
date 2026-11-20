@@ -72,11 +72,13 @@ internal class RavoUpdater(
 
     fun onResume(checkAutomatically: Boolean = true) {
         foreground = true
-        if (prefs.getBoolean("await_permission", false) &&
-            activity.packageManager.canRequestPackageInstalls()
-        ) {
-            prefs.edit().putBoolean("await_permission", false).apply()
-            installVerified()
+        if (prefs.getBoolean("await_permission", false)) {
+            val allowed = activity.packageManager.canRequestPackageInstalls()
+            prefs.edit().putBoolean("await_permission", false)
+                .putLong("install_snooze_until",
+                    if (allowed) 0L else System.currentTimeMillis() + 24L * 60 * 60 * 1000)
+                .apply()
+            if (allowed) installVerified()
         } else {
             checkFinishedDownload()
         }
@@ -109,9 +111,16 @@ internal class RavoUpdater(
         val pendingId = prefs.getLong("download_id", -1L)
         val pendingCode = prefs.getInt("download_code", 0)
         if (pendingId > 0 && pendingCode > installedCode()) {
-            checkFinishedDownload()
-            if (force && foreground) {
-                toast("Uma atualização do RAVO já está sendo baixada ou instalada.")
+            if (force && foreground && prefs.getLong("verified_id", -1L) == pendingId) {
+                // Repetir instalação caso o usuário tenha cancelado no Android.
+                prefs.edit().putLong("install_attempt_id", -1L)
+                    .putLong("install_snooze_until", 0L).apply()
+                installVerified()
+            } else {
+                checkFinishedDownload()
+                if (force && foreground) {
+                    toast("Uma atualização do RAVO já está sendo baixada ou instalada.")
+                }
             }
             return
         }
@@ -170,7 +179,7 @@ internal class RavoUpdater(
             val url = asset.optString("browser_download_url")
             val bytes = asset.optLong("size", 0L)
             if (!UpdateReleasePolicy.isValidAsset(tag, name, url, bytes)) continue
-            val digest = asset.optString("digest", "")
+            val digest = if (asset.isNull("digest")) "" else asset.optString("digest", "")
             // Havendo digest publicado, não aceitar hash malformado.
             if (digest.isNotBlank() && !Regex("^sha256:[a-fA-F0-9]{64}$").matches(digest)) {
                 return null
@@ -233,6 +242,7 @@ internal class RavoUpdater(
                 .putLong("verified_id", -1L)
                 .putLong("install_attempt_id", -1L)
                 .putBoolean("await_permission", false)
+                .putLong("install_snooze_until", 0L)
                 .apply()
             toast("Atualização sendo baixada. O Android avisará quando concluir.")
         } catch (_: Exception) {
@@ -242,6 +252,7 @@ internal class RavoUpdater(
 
     private fun checkFinishedDownload() {
         if (closed || checkingDownload) return
+        if (System.currentTimeMillis() < prefs.getLong("install_snooze_until", 0L)) return
         val id = prefs.getLong("download_id", -1L)
         if (id <= 0 || prefs.getInt("download_code", 0) <= installedCode()) return
         if (prefs.getLong("install_attempt_id", -1L) == id) return
@@ -335,7 +346,10 @@ internal class RavoUpdater(
                     "o RAVO como fonte de instalação. Essa permissão não instala nada " +
                     "sem sua confirmação."
                 )
-                .setNegativeButton("Depois", null)
+                .setNegativeButton("Depois") { _, _ ->
+                    prefs.edit().putLong("install_snooze_until",
+                        System.currentTimeMillis() + 24L * 60 * 60 * 1000).apply()
+                }
                 .setPositiveButton("Abrir configurações") { _, _ ->
                     prefs.edit().putBoolean("await_permission", true).apply()
                     try {
