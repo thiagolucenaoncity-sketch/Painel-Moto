@@ -1291,8 +1291,7 @@ class MainActivity : Activity() {
 
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val buttonSize = px(when {
-            screenMode == 0 && landscape -> 36
-            screenMode == 0 -> 42
+            screenMode == 0 -> 36
             landscape -> 44
             else -> 56
         })
@@ -1382,7 +1381,7 @@ class MainActivity : Activity() {
     private fun updateMusicFabAppearance() {
         if (!::musicFab.isInitialized) return
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val size = if (landscape) 20 else if (screenMode == 0) 22 else 30
+        val size = if (screenMode == 0) 19 else if (landscape) 20 else 30
         val drawable = getDrawable(
             if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_moderno
         )?.mutate()
@@ -1394,7 +1393,7 @@ class MainActivity : Activity() {
         musicFab.foreground = drawable
         musicFab.background = box(this, accent,
             if (landscape) (if (screenMode == 0) 18 else 22)
-            else if (screenMode == 0) 21 else 28, 0x77FFFFFF)
+            else if (screenMode == 0) 18 else 28, 0x77FFFFFF)
         musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
             else "Abrir player de áudio"
     }
@@ -3140,8 +3139,8 @@ class MainActivity : Activity() {
             gravity = Gravity.START
         }
         musicDock.addView(musicFab, LinearLayout.LayoutParams(
-            px(if (screenMode == 0) 42 else 56),
-            px(if (screenMode == 0) 42 else 56)
+            px(if (screenMode == 0) 36 else 56),
+            px(if (screenMode == 0) 36 else 56)
         ))
         musicDock.addView(musicPopup, LinearLayout.LayoutParams(px(280), WRAP).apply {
             topMargin = px(8)
