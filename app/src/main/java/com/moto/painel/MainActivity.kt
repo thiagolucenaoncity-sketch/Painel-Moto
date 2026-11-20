@@ -139,7 +139,16 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
     if (strokeColor != null) setStroke(ctx.px(1), strokeColor)
 }
 
-private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
+private class Step(
+    val lat: Double,
+    val lon: Double,
+    val text: String,        // frase completa somente para áudio/TTS
+    val distanceM: Double,
+    val road: String,
+    val maneuverType: String,
+    val maneuverModifier: String,
+    val exitNumber: Int
+)
 
 // Sugestão de endereço (aparece enquanto você digita)
 private class Suggest(val name: String, val lat: Double, val lon: Double)
@@ -417,6 +426,8 @@ class MainActivity : Activity() {
     private lateinit var fullRoadLimitIcon: ImageView
     private var currentRoadLimit: Int? = null
     private lateinit var navView: TextView
+    private lateinit var panelManeuverIcon: ManeuverIconView
+    private lateinit var panelManeuverDistance: TextView
     private lateinit var tripHeader: TextView
     private lateinit var distView: TextView
     private lateinit var timeView: TextView
@@ -443,6 +454,8 @@ class MainActivity : Activity() {
     private lateinit var instrCard: LinearLayout
     private lateinit var mapInstructionView: TextView
     private lateinit var mapInfoView: TextView
+    private lateinit var mapManeuverIcon: ManeuverIconView
+    private lateinit var mapManeuverDistance: TextView
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
@@ -2178,14 +2191,18 @@ class MainActivity : Activity() {
             announcedNear = false
             if (stepIndex < steps.size) {
                 val next = steps[stepIndex]
-                showInstruction(next.text, "")
+                val nextMeters = distance(loc.latitude, loc.longitude, next.lat, next.lon)
+                showManeuver(next, nextMeters)
                 say(next.text)
             } else {
                 // A rota pode continuar desenhada, mas os dados de ETA somem ao chegar.
                 roadAlerts.stopNavigation()
                 etaActive = false
                 refreshEtaPanels()
-                showInstruction("Você chegou ao destino", "")
+                showManeuver(
+                    Step(loc.latitude, loc.longitude, "Você chegou ao destino",
+                        0.0, "Destino", "arrive", "", 0), 0.0
+                )
                 say("Você chegou ao destino")
             }
             return
@@ -2200,8 +2217,7 @@ class MainActivity : Activity() {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastInstructionRefreshMs >= 3000L) {
             lastInstructionRefreshMs = now
-            val remaining = d + steps.drop(stepIndex).sumOf { it.distanceM }
-            showInstruction("${s.text} · em ${fmtDist(d)}", "Faltam ${fmtDist(remaining)}")
+            showManeuver(s, d)
         }
     }
 
@@ -2240,25 +2256,42 @@ class MainActivity : Activity() {
         fetchRoute(loc, dest.latitude, dest.longitude, routeName, true)
     }
 
-    // Mostra a instrução no cartão do mapa e na linha de navegação do painel
-    private fun showInstruction(main: String, sub: String) {
-        // Os cartões e menus têm listeners de layout. Não reenviar o
-        // mesmo texto, evitando cascatas de layout e atualização de views.
-        val changed = mapInstructionView.text.toString() != main ||
-            mapInfoView.text.toString() != sub
-        if (!changed) return
-        if (mapInstructionView.text.toString() != main) mapInstructionView.text = main
-        if (mapInfoView.text.toString() != sub) mapInfoView.text = sub
-        val nav = "➜ $main"
-        if (navView.text.toString() != nav) navView.text = nav
-        val visible = if (main.isEmpty()) View.GONE else View.VISIBLE
-        if (navView.visibility != visible) navView.visibility = visible
-        navView.isSelected = true
-        // Só atualizar botões quando o cartão muda de visibilidade.
-        val shouldShow = hasRoute() && main.isNotEmpty()
-        if (instrCard.visibility != (if (shouldShow) View.VISIBLE else View.GONE)) {
-            refreshMapButtons()
+    // Navegação visual compacta: desenho vetorial + rua real + distância.
+    // A instrução completa continua exclusivamente na voz do navegador.
+    private fun showManeuver(step: Step, distanceMeters: Double) {
+        if (!::mapManeuverIcon.isInitialized || !::panelManeuverIcon.isInitialized) return
+        val action = ManeuverPresentation.action(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        val road = ManeuverPresentation.roadTitle(step.road, step.maneuverType, action)
+        val distanceText = if (step.maneuverType == "arrive" && distanceMeters <= 40.0) {
+            "Chegou"
+        } else fmtDist(distanceMeters.coerceAtLeast(0.0))
+
+        val wasHidden = instrCard.visibility != View.VISIBLE
+        if (mapInstructionView.text.toString() != road) mapInstructionView.text = road
+        if (mapInfoView.text.toString() != action) mapInfoView.text = action
+        if (mapManeuverDistance.text.toString() != distanceText) {
+            mapManeuverDistance.text = distanceText
         }
+        if (navView.text.toString() != road) navView.text = road
+        if (panelManeuverDistance.text.toString() != distanceText) {
+            panelManeuverDistance.text = distanceText
+        }
+        mapManeuverIcon.setManeuver(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        panelManeuverIcon.setManeuver(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        if (navView.visibility != View.VISIBLE) navView.visibility = View.VISIBLE
+        if (panelManeuverDistance.visibility != View.VISIBLE) {
+            panelManeuverDistance.visibility = View.VISIBLE
+        }
+        if (panelManeuverIcon.visibility != View.VISIBLE) {
+            panelManeuverIcon.visibility = View.VISIBLE
+        }
+        if (wasHidden) refreshMapButtons()
     }
 
     // Busca a rota (usada na primeira vez e também no recálculo)
@@ -2295,7 +2328,11 @@ class MainActivity : Activity() {
                                 loc.getDouble(1),
                                 loc.getDouble(0),
                                 describe(man, s.optString("name")),
-                                s.getDouble("distance")
+                                s.getDouble("distance"),
+                                s.optString("name"),
+                                man.optString("type"),
+                                man.optString("modifier"),
+                                man.optInt("exit", 0)
                             )
                         )
                     }
@@ -2370,7 +2407,10 @@ class MainActivity : Activity() {
 
         if (list.isNotEmpty()) {
             val first = list[stepIndex]
-            showInstruction(first.text, "Total ${fmtDist(totalM)} · cerca de ${(durS / 60).roundToInt()} min")
+            val metersToTurn = lastFix?.let {
+                distance(it.latitude, it.longitude, first.lat, first.lon)
+            } ?: first.distanceM
+            showManeuver(first, metersToTurn)
             say(if (isRecalc) "Rota recalculada. ${first.text}" else first.text)
         }
         refreshEtaPanels()
@@ -2406,8 +2446,12 @@ class MainActivity : Activity() {
 
         mapInstructionView.text = ""
         mapInfoView.text = ""
+        mapManeuverDistance.text = ""
         navView.text = ""
+        panelManeuverDistance.text = ""
         navView.visibility = View.GONE
+        panelManeuverIcon.visibility = View.GONE
+        panelManeuverDistance.visibility = View.GONE
         refreshEtaPanels()
         refreshMapButtons()
     }
