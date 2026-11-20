@@ -8,6 +8,7 @@ class RavoApp : Application() {
         super.onCreate()
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            Diagnostics.crash(this, error)
             getSharedPreferences("crash", MODE_PRIVATE).edit()
                 .putString("log", error.stackTraceToString())
                 .commit()
