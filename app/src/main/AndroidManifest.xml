@@ -27,6 +27,12 @@
             android:name=".CrashActivity"
             android:exported="false" />
 
+        <!-- Laboratório isolado: nunca inicia como launcher/navegador. -->
+        <activity
+            android:name=".maps.RavoMapsLabActivity"
+            android:label="RAVO Maps Lab"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
