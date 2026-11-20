@@ -2970,9 +2970,9 @@ class MainActivity : Activity() {
         timeView = statValue(fmtHMS(elapsedMs()))
         maxView = statValue(speedText(maxSpeed))
         val statsBox = LinearLayout(this).apply {
-            // Paisagem: os três valores numa faixa horizontal de baixa
-            // altura. Retrato continua com os três cards habituais.
-            orientation = LinearLayout.HORIZONTAL
+            // Retrato: três cartões EMPILHADOS na coluna direita.
+            // Paisagem: mantém a faixa horizontal que já foi aprovada.
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
         listOf(
@@ -2995,7 +2995,19 @@ class MainActivity : Activity() {
                     setMargins(px(2), 0, px(2), 0)
                 }
             } else {
-                LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) }
+                value.textSize = 14f
+                value.includeFontPadding = false
+                value.setAutoSizeTextTypeUniformWithConfiguration(
+                    10, 14, 1, TypedValue.COMPLEX_UNIT_SP
+                )
+                (card.getChildAt(0) as TextView).apply {
+                    textSize = 9f
+                    includeFontPadding = false
+                }
+                card.setPadding(px(2), px(3), px(2), px(3))
+                LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                    setMargins(0, px(2), 0, px(2))
+                }
             }
             statsBox.addView(card, lp)
         }
@@ -3151,11 +3163,11 @@ class MainActivity : Activity() {
         val vehicleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(View(this@MainActivity),
-                LinearLayout.LayoutParams(px(if (landscape) 36 else 42), px(if (landscape) 34 else 42)))
+            val rowHeight = px(if (landscape) 34 else 34)
+            val sideWidth = px(if (landscape) 36 else 38)
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(sideWidth, rowHeight))
             addView(vehicleView, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(settingsBtn,
-                LinearLayout.LayoutParams(px(if (landscape) 36 else 42), px(if (landscape) 34 else 42)))
+            addView(settingsBtn, LinearLayout.LayoutParams(sideWidth, rowHeight))
         }
         // Dois acessos separados para evitar toque errado ao pilotar.
         // Instrução da rota centralizada ENTRE os acessos ao mapa e trips.
@@ -3179,14 +3191,16 @@ class MainActivity : Activity() {
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val h = px(if (landscape) 34 else 40)
-            val w = px(if (landscape) 36 else 44)
-            addView(mapBtn, LinearLayout.LayoutParams(w, h))
-            addView(miniManeuver, LinearLayout.LayoutParams(0, h, 1f).apply {
-                leftMargin = px(if (landscape) 3 else 6)
-                rightMargin = px(if (landscape) 3 else 6)
-            })
-            addView(tripsBtn, LinearLayout.LayoutParams(w, h))
+            val h = px(34)
+            // Apenas paisagem: mantém sua barra existente, sem modificações.
+            if (landscape) {
+                addView(mapBtn, LinearLayout.LayoutParams(px(36), h))
+                addView(miniManeuver, LinearLayout.LayoutParams(0, h, 1f).apply {
+                    leftMargin = px(3)
+                    rightMargin = px(3)
+                })
+                addView(tripsBtn, LinearLayout.LayoutParams(px(36), h))
+            }
         }
 
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
@@ -3213,17 +3227,92 @@ class MainActivity : Activity() {
             root.addView(left, LinearLayout.LayoutParams(0, MATCH, 2.6f))
             root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply { leftMargin = px(6) })
         } else {
-            // Retrato: a viagem fica no rodapé. A remoção dos cinco botões
-            // inferiores libera altura para ampliar o minimapa e centralizar
-            // os números do velocímetro no mapa maior.
+            // Retrato: 2 colunas, ~69% para o minimapa e ~31% para a trip.
+            // A mudança é inteiramente isolada do layout paisagem.
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            root.addView(panelEtaCard, gap(4))
+            root.addView(panelEtaCard, gap(2))
             root.addView(vehicleRow, gap(0))
-            root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            root.addView(navRow, gap(4))
-            root.addView(tripHeader, gap(2))
-            root.addView(statsBox, gap(2))
-            root.addView(tripRow, gap(4))
+
+            // Botão de mapa completo acima da centralização, ambos à esquerda
+            // do minimapa com 20dp de separação entre as áreas de toque.
+            arcBlock.addView(mapBtn, FrameLayout.LayoutParams(px(46), px(46),
+                Gravity.BOTTOM or Gravity.START).apply {
+                    leftMargin = px(14)
+                    bottomMargin = px(10 + 52 + 20)
+            })
+
+            // Instrução vetorial permanece legível logo abaixo do minimapa
+            // e não duplica o botão de abrir mapa ou acessar as trips.
+            val mapColumn = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
+                addView(miniManeuver, LinearLayout.LayoutParams(MATCH, px(36)).apply {
+                    topMargin = px(3)
+                })
+            }
+
+            // O botão pausa continua acessível no cabeçalho sempre que a
+            // trip estiver ativa (sua visibilidade segue updateTripButtons).
+            val tripHeading = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(tripHeader, LinearLayout.LayoutParams(0, WRAP, 1f))
+                addView(pauseBtn, LinearLayout.LayoutParams(px(32), px(34)))
+            }
+
+            // Layout solicitado: Iniciar/Finalizar + Zerar na primeira linha;
+            // Salvar + Ver trips na segunda, todos com texto legível.
+            listOf(tripBtn, resetBtn, saveBtn, tripsBtn).forEach { btn ->
+                btn.foreground = null
+                btn.setCompoundDrawables(null, null, null, null)
+                btn.setPadding(px(1), 0, px(1), 0)
+                btn.textSize = 10f
+                btn.isSingleLine = true
+                btn.ellipsize = TextUtils.TruncateAt.END
+                btn.gravity = Gravity.CENTER
+            }
+            saveBtn.text = "Salvar"
+            resetBtn.text = "Zerar"
+            tripsBtn.text = "Ver trips"
+            tripsBtn.contentDescription = "Ver trips salvas"
+            val actionsOne = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(tripBtn, LinearLayout.LayoutParams(0, px(42), 1f).apply {
+                    rightMargin = px(2)
+                })
+                addView(resetBtn, LinearLayout.LayoutParams(0, px(42), 1f).apply {
+                    leftMargin = px(2)
+                })
+            }
+            val actionsTwo = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(saveBtn, LinearLayout.LayoutParams(0, px(42), 1f).apply {
+                    rightMargin = px(2)
+                })
+                addView(tripsBtn, LinearLayout.LayoutParams(0, px(42), 1f).apply {
+                    leftMargin = px(2)
+                })
+            }
+            val tripColumn = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(tripHeading, gap(2))
+                addView(statsBox, gap(2))
+                addView(actionsOne, gap(6))
+                addView(actionsTwo, gap(5))
+            }
+            val tripScroll = ScrollView(this).apply {
+                isFillViewport = false
+                isVerticalScrollBarEnabled = false
+                addView(tripColumn, LinearLayout.LayoutParams(MATCH, WRAP))
+            }
+            val mapAndTrip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(mapColumn, LinearLayout.LayoutParams(0, MATCH, 2.2f))
+                addView(tripScroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply {
+                    leftMargin = px(5)
+                })
+            }
+            root.addView(mapAndTrip, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
         return root
     }
