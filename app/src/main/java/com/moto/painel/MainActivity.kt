@@ -304,6 +304,10 @@ class EqualizerView(ctx: Context) : View(ctx) {
 class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
+    // MapView precisa receber exatamente os eventos reais de Activity.
+    // Não iniciar dois renderizadores juntos nem duplicar onStart/onResume.
+    private var activityStarted = false
+    private var activityResumed = false
     private var isConnected: Boolean? = null
     private var offlineNotice: TextView? = null
     private var lastRoadDataCheckMs = 0L
@@ -740,11 +744,11 @@ class MainActivity : Activity() {
         // Evita reenviar o mesmo marcador a cada GPS, causando reprocessamento.
         var lastMarkerPosition: Location? = null
         var lastMarkerScreenBearing = Double.NaN
+        var started = false
+        var resumed = false
 
         init {
             view.onCreate(null)
-            view.onStart()
-            view.onResume()
             view.getMapAsync { m ->
                 map = m
                 m.uiSettings.setAllGesturesEnabled(interactive)
@@ -822,6 +826,7 @@ class MainActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         setContentView(buildUi())
+        syncMapLifecycle()
         updateMedia()
     }
 
@@ -833,33 +838,69 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun syncMapLifecycle() {
+        for (h in holders) {
+            if (activityStarted && !h.started) {
+                h.view.onStart()
+                h.started = true
+            }
+            // Apenas o mapa visível continua com o renderizador ativo.
+            // Isso reduz GPU, memória e trabalho em segundo plano.
+            val shouldResume = activityResumed &&
+                (if (h.interactive) screenMode == 1 else screenMode == 0)
+            if (shouldResume && !h.resumed) {
+                h.view.onResume()
+                h.resumed = true
+            } else if (!shouldResume && h.resumed) {
+                h.view.onPause()
+                h.resumed = false
+            }
+        }
+    }
+
     override fun onStart() {
         super.onStart()
-        holders.forEach { it.view.onStart() }
+        activityStarted = true
+        syncMapLifecycle()
     }
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         // Se mudou alguma configuração na tela de Configurações, redesenha a tela principal
         if (Prefs.version(this) != appliedVer) {
             setContentView(buildUi())
             updateMedia()
         }
-        holders.forEach { it.view.onResume() }
+        syncMapLifecycle()
         updateConnection()
+        handler.removeCallbacks(tick)
+        handler.removeCallbacks(pollSessions)
+        handler.removeCallbacks(eqTick)
         handler.post(tick)
         handler.post(pollSessions)
         handler.post(eqTick)
     }
 
     override fun onPause() {
-        super.onPause()
-        holders.forEach { it.view.onPause() }
+        activityResumed = false
+        syncMapLifecycle()
         handler.removeCallbacksAndMessages(null)
+        super.onPause()
     }
 
     override fun onStop() {
-        holders.forEach { it.view.onStop() }
+        activityStarted = false
+        holders.forEach {
+            if (it.resumed) {
+                it.view.onPause()
+                it.resumed = false
+            }
+            if (it.started) {
+                it.view.onStop()
+                it.started = false
+            }
+        }
         super.onStop()
     }
 
@@ -875,8 +916,8 @@ class MainActivity : Activity() {
 
     private fun destroyHolders() {
         holders.forEach {
-            it.view.onPause()
-            it.view.onStop()
+            if (it.resumed) it.view.onPause()
+            if (it.started) it.view.onStop()
             it.view.onDestroy()
         }
         holders.clear()
@@ -1966,6 +2007,8 @@ class MainActivity : Activity() {
 
     private fun setScreen(mode: Int) {
         screenMode = mode
+        // Suspende o mapa que ficou oculto, mas mantém o GPS ativo.
+        syncMapLifecycle()
         panelScreen.visibility = if (mode == 0) View.VISIBLE else View.GONE
         mapScreen.visibility = if (mode == 1) View.VISIBLE else View.GONE
         tripsScreen.visibility = if (mode == 2) View.VISIBLE else View.GONE
