@@ -139,6 +139,30 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
     if (strokeColor != null) setStroke(ctx.px(1), strokeColor)
 }
 
+// Acabamento RAVO: luz no alto, profundidade na base e borda sutil.
+// Usa as cores já configuradas no tema, sem imagens externas ou animação contínua.
+private fun glossyButton(ctx: Context, color: Int, radiusDp: Int = 16, border: Int? = null): StateListDrawable {
+    fun face(pressed: Boolean): GradientDrawable {
+        val factor = if (pressed) 0.82f else 1f
+        val top = Color.rgb(
+            (Color.red(color) * factor + (255 - Color.red(color)) * if (pressed) 0.05f else 0.23f).roundToInt().coerceIn(0, 255),
+            (Color.green(color) * factor + (255 - Color.green(color)) * if (pressed) 0.05f else 0.23f).roundToInt().coerceIn(0, 255),
+            (Color.blue(color) * factor + (255 - Color.blue(color)) * if (pressed) 0.05f else 0.23f).roundToInt().coerceIn(0, 255)
+        )
+        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(top, shade(color, if (pressed) 0.65f else 0.97f),
+                shade(color, if (pressed) 0.52f else 0.66f))).apply {
+            cornerRadius = ctx.pxF(radiusDp.toFloat())
+            setStroke(ctx.px(1).coerceAtLeast(1),
+                border ?: withAlpha(Color.WHITE, if (pressed) 85 else 125))
+        }
+    }
+    return StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), face(true))
+        addState(intArrayOf(), face(false))
+    }
+}
+
 private class Step(
     val lat: Double,
     val lon: Double,
@@ -1287,15 +1311,13 @@ class MainActivity : Activity() {
     // ---------- Botões flutuantes do mapa (estilo azul-marinho semitransparente) ----------
 
     // Fundo normal (azul-marinho semitransparente) e efeito ao pressionar
-    private fun floatBg(): StateListDrawable = StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_pressed), box(this@MainActivity, 0xEE1D3A66.toInt(), 14, 0x806FA8E8.toInt()))
-        addState(intArrayOf(), box(this@MainActivity, 0xCC0B1A33.toInt(), 14, 0x553A6FB0))
-    }
+    private fun floatBg(): StateListDrawable =
+        glossyButton(this, 0xFF142B50.toInt(), 14, withAlpha(accent, 155))
 
     // Centralização moderna: alvo vetorial, borda na cor do tema e área de toque maior.
     private fun modernRecenterButton(): Button = floatBtn("") { recenter() }.apply {
         panelIcon(R.drawable.ravo_recenter, Color.WHITE, 27)
-        background = box(this@MainActivity, 0xEE15385B.toInt(), 18, accent)
+        background = glossyButton(this@MainActivity, 0xFF15385B.toInt(), 18, accent)
         contentDescription = "Centralizar na minha localização"
         elevation = pxF(4f)
     }
@@ -1321,7 +1343,7 @@ class MainActivity : Activity() {
 
     // Ativado: fundo na cor de destaque (azul elétrico por padrão). Desativado: fica mais apagado
     private fun setOn(b: Button, on: Boolean, enabled: Boolean = true) {
-        b.background = if (on) box(this, accent, 14) else floatBg()
+        b.background = if (on) glossyButton(this, accent, 14) else floatBg()
         b.setTextColor(Color.WHITE)
         b.alpha = if (enabled) 1f else 0.4f
     }
@@ -1444,7 +1466,7 @@ class MainActivity : Activity() {
         musicFab.setCompoundDrawables(null, null, null, null)
         musicFab.foregroundGravity = Gravity.CENTER
         musicFab.foreground = drawable
-        musicFab.background = box(this, accent,
+        musicFab.background = glossyButton(this, accent,
             if (landscape) (if (screenMode == 0) 18 else 22)
             else if (screenMode == 0) 21 else 28, 0x77FFFFFF)
         musicFab.contentDescription = if (musicOpen) "Fechar player de áudio"
@@ -2768,7 +2790,7 @@ class MainActivity : Activity() {
         setTextColor(fg)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, bg, 16, withAlpha(fg, 45))
+        background = glossyButton(context, bg, 16, withAlpha(fg, 90))
         minHeight = 0
         minimumHeight = 0
     }
@@ -2801,7 +2823,7 @@ class MainActivity : Activity() {
         setTextColor(Color.WHITE)
         isAllCaps = false
         stateListAnimator = null
-        background = box(context, BTN_BG, 16, withAlpha(accent, 105))
+        background = glossyButton(context, BTN_BG, 16, withAlpha(accent, 155))
         minHeight = 0
         minimumHeight = 0
         setPadding(0, 0, 0, 0)
@@ -3225,7 +3247,7 @@ class MainActivity : Activity() {
                 else "Abrir player de áudio"
             isAllCaps = false
             stateListAnimator = null
-            background = box(context, accent, 28, 0x77FFFFFF)
+            background = glossyButton(context, accent, 28, 0x99FFFFFF.toInt())
             elevation = pxF(5f)
             minHeight = 0
             minimumHeight = 0
@@ -3770,7 +3792,7 @@ class MainActivity : Activity() {
                 px(if (landscape) 48 else 62), px(if (landscape) 48 else 62)))
         }
         cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
-            background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
+            background = glossyButton(this@MainActivity, 0xFF45202A.toInt(), 16, 0xFFFF8080.toInt())
             contentDescription = "Cancelar rota com confirmação"
         }
 
