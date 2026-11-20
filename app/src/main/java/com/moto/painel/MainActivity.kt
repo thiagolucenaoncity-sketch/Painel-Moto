@@ -1381,7 +1381,7 @@ class MainActivity : Activity() {
     private fun updateMusicFabAppearance() {
         if (!::musicFab.isInitialized) return
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val size = if (screenMode == 0) 19 else if (landscape) 20 else 30
+        val size = if (landscape) 20 else if (screenMode == 0) 19 else 30
         val drawable = getDrawable(
             if (musicOpen) R.drawable.ravo_player_close else R.drawable.ravo_player_moderno
         )?.mutate()
