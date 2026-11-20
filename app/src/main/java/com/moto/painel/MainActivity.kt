@@ -2284,6 +2284,9 @@ class MainActivity : Activity() {
         panelManeuverIcon.setManeuver(
             step.maneuverType, step.maneuverModifier, step.exitNumber
         )
+        mapManeuverIcon.contentDescription = action
+        panelManeuverIcon.contentDescription = action
+        instrCard.contentDescription = "$action, $road, em $distanceText"
         if (navView.visibility != View.VISIBLE) navView.visibility = View.VISIBLE
         if (panelManeuverDistance.visibility != View.VISIBLE) {
             panelManeuverDistance.visibility = View.VISIBLE
@@ -2890,12 +2893,19 @@ class MainActivity : Activity() {
             topMargin = px(10)
         })
 
-        // Linha de navegação: fica numa linha só e desliza se for longa
-        navView = label(15f, cClock, bold = true, align = Gravity.CENTER).apply {
+        // Navegação compacta: seta de manobra REAL, rua e distância.
+        // Sem emoji nem frase longa deslizando na tela.
+        navView = label(12f, Color.WHITE, bold = true).apply {
             visibility = View.GONE
             isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.MARQUEE
-            isSelected = true
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        panelManeuverDistance = label(12f, accent, bold = true).apply {
+            visibility = View.GONE
+            isSingleLine = true
+        }
+        panelManeuverIcon = ManeuverIconView(this, accent).apply {
+            visibility = View.GONE
         }
 
         // Cabeçalho da trip: mostra o status (em andamento, pausada, parada)
@@ -3062,15 +3072,28 @@ class MainActivity : Activity() {
         }
         // Dois acessos separados para evitar toque errado ao pilotar.
         // Instrução da rota centralizada ENTRE os acessos ao mapa e trips.
-        navView.textSize = 13f
         navView.setAutoSizeTextTypeUniformWithConfiguration(
-            10, 14, 1, TypedValue.COMPLEX_UNIT_SP
+            10, 12, 1, TypedValue.COMPLEX_UNIT_SP
         )
+        val miniNavText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(navView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(panelManeuverDistance, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        val miniManeuver = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(panelManeuverIcon, LinearLayout.LayoutParams(px(32), px(32)).apply {
+                rightMargin = px(4)
+            })
+            addView(miniNavText, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(mapBtn, LinearLayout.LayoutParams(px(44), px(40)))
-            addView(navView, LinearLayout.LayoutParams(0, px(40), 1f).apply {
+            addView(miniManeuver, LinearLayout.LayoutParams(0, px(40), 1f).apply {
                 leftMargin = px(6)
                 rightMargin = px(6)
             })
@@ -3231,16 +3254,44 @@ class MainActivity : Activity() {
             addView(addFavBtn, LinearLayout.LayoutParams(px(40), px(40)))
         }
 
-        // Cartão de instrução (só aparece com rota ativa)
-        mapInstructionView = label(18f, Color.WHITE, bold = true).apply { maxLines = 2 }
-        mapInfoView = label(13f, cClock)
+        // Cartão compacto: ícone de manobra vetorial + rua + distância.
+        // Mantém o nome real fornecido pelo OSRM, sem inventar ruas.
+        mapInstructionView = label(16f, Color.WHITE, bold = true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        mapInfoView = label(12f, cClock).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        mapManeuverDistance = label(16f, accent, bold = true, align = Gravity.END).apply {
+            maxLines = 1
+            setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, TypedValue.COMPLEX_UNIT_SP)
+        }
+        mapManeuverIcon = ManeuverIconView(this, accent)
+        val maneuverTitle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        val maneuverRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mapManeuverIcon, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                rightMargin = px(8)
+            })
+            addView(maneuverTitle, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(mapManeuverDistance, LinearLayout.LayoutParams(px(76), WRAP).apply {
+                leftMargin = px(8)
+            })
+        }
         instrCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
-            setPadding(px(14), px(10), px(14), px(10))
+            setPadding(px(12), px(8), px(12), px(8))
             visibility = View.GONE
-            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(maneuverRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
         val topCol = LinearLayout(this).apply {
