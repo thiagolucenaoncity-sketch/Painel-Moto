@@ -96,6 +96,35 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
         minimumHeight = 0
     }
 
+    /**
+     * Na tela inicial paisagem a previsão sai de cima do mapa e passa para
+     * a parte inferior da coluna da trip, com três blocos empilhados.
+     * No retrato e no mapa completo o cartão continua horizontal.
+     */
+    fun setLandscapeSidebar() {
+        setCompact(true)
+        orientation = VERTICAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(5), dp(4), dp(5), dp(4))
+        groups.forEach { group ->
+            val params = group.layoutParams as LayoutParams
+            params.width = LayoutParams.MATCH_PARENT
+            params.height = LayoutParams.WRAP_CONTENT
+            params.weight = 0f
+            params.topMargin = dp(2)
+            params.bottomMargin = dp(2)
+            group.layoutParams = params
+            group.setPadding(dp(2), dp(1), dp(2), dp(1))
+        }
+        labels.forEach { it.textSize = 8f }
+        values.forEach {
+            it.textSize = 12f
+            it.setAutoSizeTextTypeUniformWithConfiguration(
+                10, 12, 1, TypedValue.COMPLEX_UNIT_SP
+            )
+        }
+    }
+
     fun render(arrival: String, duration: String, kilometers: String) {
         if (eta.second.text.toString() != arrival) eta.second.text = arrival
         if (time.second.text.toString() != duration) time.second.text = duration
