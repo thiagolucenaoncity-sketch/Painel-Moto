@@ -65,6 +65,14 @@ class RavoMapsCoreView(context: Context) : View(context) {
             }
         })
 
+    // Movimento sintético exclusivo do laboratório: nenhuma posição real ou GPS.
+    fun benchmarkFrame(phase: Float) {
+        offsetX = kotlin.math.sin(phase.toDouble()).toFloat() * 65f * density
+        offsetY = kotlin.math.cos(phase.toDouble() * 0.7).toFloat() * 55f * density
+        zoom = 1.1f + (kotlin.math.sin(phase.toDouble() * 0.5).toFloat() + 1f) * 0.30f
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(dark)
