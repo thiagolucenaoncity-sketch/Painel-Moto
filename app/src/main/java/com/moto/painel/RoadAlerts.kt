@@ -198,18 +198,70 @@ class RoadAlerts(
             now - lastFetch > (if (lastFailure) 90000L else 25000L)
         ) load(loc)
     }
-    fun features(): FeatureCollection = FeatureCollection.fromFeatures(hazards.filter { enabled(it) }.map {
-        Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)).apply {
-            addStringProperty("type", it.type)
-            addStringProperty("priority", priorities[it.id] ?: "other")
-            // A placa ao lado do radar só aparece quando a base conhece o limite.
-            // Sem valor cadastrado, não inventa velocidade.
-            val knownLimit = if (it.type == "radar") it.limit.toIntOrNull() else null
-            if (knownLimit != null && knownLimit in 10..140 && knownLimit % 5 == 0) {
-                addStringProperty("speedSign", "ravo-limit-" + knownLimit)
+    // Apresentação é separada dos dados de segurança: TODA a base continua
+    // acessível a onLocation() para alertas sonoros, sem os cortes visuais.
+    // Evita desenhar centenas de símbolos num único cruzamento.
+    private data class VisualHazard(
+        val point: Hazard,
+        val priority: String,
+        val metersSquared: Double,
+        val rank: Int
+    )
+
+    fun features(zoom: Double, centerLat: Double, centerLon: Double): FeatureCollection {
+        val viewZoom = zoom.coerceIn(0.0, 22.0)
+        val meterLon = 111320.0 * cos(Math.toRadians(centerLat))
+        val showRadar = Prefs.getInt(context, "alert_radar") == 0
+        val showBump = Prefs.getInt(context, "alert_bump") == 0
+        val showSignal = Prefs.getInt(context, "alert_semaforo") == 0
+
+        // Em zoom aberto: próximos radares na rota; aproximando: objetos
+        // de rua. Semáforos e lombadas são ocultados primeiro.
+        val maxVisible = AlertVisualPolicy.maxVisible(viewZoom)
+        val chosen = hazards.asSequence().mapNotNull { h ->
+            when (h.type) {
+                "radar" -> if (!showRadar) return@mapNotNull null
+                "lombada" -> if (!showBump) return@mapNotNull null
+                "semaforo" -> if (!showSignal) return@mapNotNull null
+                else -> return@mapNotNull null
             }
-        }
-    })
+            val priority = if (navigationActive) priorities[h.id] ?: "other" else "other"
+            // Próximo radar da rota tem prioridade máxima; o restante aparece
+            // conforme proximidade e zoom. A distância é calculada em metros.
+            val radius = AlertVisualPolicy.radiusMeters(h.type, priority, viewZoom)
+            if (radius <= 0.0) return@mapNotNull null
+            val dx = (h.lon - centerLon) * meterLon
+            val dy = (h.lat - centerLat) * 111320.0
+            val d2 = dx * dx + dy * dy
+            if (d2 > radius * radius) return@mapNotNull null
+            val rank = when (priority) {
+                "next" -> 0
+                "route" -> if (h.type == "radar") 1 else 2
+                else -> when (h.type) {
+                    "radar" -> 3
+                    "lombada" -> 4
+                    else -> 5
+                }
+            }
+            VisualHazard(h, priority, d2, rank)
+        }.sortedWith(compareBy<VisualHazard> { it.rank }.thenBy { it.metersSquared })
+            .take(maxVisible).toList()
+
+        return FeatureCollection.fromFeatures(chosen.map { candidate ->
+            val h = candidate.point
+            Feature.fromGeometry(Point.fromLngLat(h.lon, h.lat)).apply {
+                addStringProperty("type", h.type)
+                addStringProperty("priority", candidate.priority)
+                // As placas dos outros radares só aparecem bem de perto,
+                // poupando espaço; o próximo radar conserva seu limite.
+                val showPlate = AlertVisualPolicy.showSpeedSign(candidate.priority, viewZoom)
+                val limit = if (showPlate && h.type == "radar") h.limit.toIntOrNull() else null
+                if (limit != null && limit in 10..140 && limit % 5 == 0) {
+                    addStringProperty("speedSign", "ravo-limit-" + limit)
+                }
+            }
+        })
+    }
     private fun enabled(h: Hazard): Boolean = Prefs.getInt(context, when (h.type) {
         "radar" -> "alert_radar"
         "semaforo" -> "alert_semaforo"

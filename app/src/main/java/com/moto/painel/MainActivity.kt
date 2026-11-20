@@ -506,9 +506,35 @@ class MainActivity : Activity() {
         RoadAlerts(this, { message -> say(message) }, { refreshRoadAlerts() }, { message -> toast(message) })
     }
 
-    private fun refreshRoadAlerts() {
-        val geo = roadAlerts.features()
-        holders.forEach { h -> h.alertSrc?.setGeoJson(geo) }
+    private fun refreshRoadAlerts(force: Boolean = true) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        holders.forEach { h ->
+            val source = h.alertSrc ?: return@forEach
+            val map = h.map ?: return@forEach
+            // O mapa oculto não deve desperdiçar processamento de símbolos.
+            if ((screenMode == 1) != h.interactive || screenMode == 2) return@forEach
+            val camera = map.cameraPosition
+            val center = if (followMe) (mapFix ?: lastFix) else null
+            val lat = center?.latitude ?: camera.target?.latitude ?: return@forEach
+            val lon = center?.longitude ?: camera.target?.longitude ?: return@forEach
+            val zoom = camera.zoom
+            val previous = h.lastAlertCenter
+            val moved = if (previous != null) {
+                val dy = (lat - previous.latitude) * 111320.0
+                val dx = (lon - previous.longitude) * 111320.0 *
+                    kotlin.math.cos(Math.toRadians(lat))
+                kotlin.math.sqrt(dx * dx + dy * dy)
+            } else Double.MAX_VALUE
+            // Geometria visual: no máximo uma reavaliação a cada 4s em
+            // navegação, a menos que mudem alertas, zoom ou área explorada.
+            if (!force && now - h.lastAlertDrawMs < 4000L &&
+                moved < 75.0 && kotlin.math.abs(zoom - h.lastAlertZoom) < 0.6
+            ) return@forEach
+            h.lastAlertDrawMs = now
+            h.lastAlertZoom = zoom
+            h.lastAlertCenter = LatLng(lat, lon)
+            source.setGeoJson(roadAlerts.features(zoom, lat, lon))
+        }
     }
 
     // Limite da via vem de maxspeed do OpenStreetMap, NÃO do radar.
@@ -694,6 +720,8 @@ class MainActivity : Activity() {
             }
             roadAlerts.onLocation(loc)
             roadSpeedSource.onLocation(loc)
+            // Atualiza apenas os alertas VISÍVEIS ao mover a região exibida.
+            refreshRoadAlerts(force = false)
 
             // Primeira localização: já posiciona o mapa
             if (!firstFixDone) {
@@ -744,6 +772,9 @@ class MainActivity : Activity() {
         // Evita reenviar o mesmo marcador a cada GPS, causando reprocessamento.
         var lastMarkerPosition: Location? = null
         var lastMarkerScreenBearing = Double.NaN
+        var lastAlertDrawMs = 0L
+        var lastAlertZoom = -1.0
+        var lastAlertCenter: LatLng? = null
         var started = false
         var resumed = false
 
@@ -767,6 +798,9 @@ class MainActivity : Activity() {
                 if (interactive) {
                     // A previsao fica fixa no rodape, sem seguir o marcador.
                     m.addOnCameraIdleListener {
+                        // Em pan/zoom atualizar as prioridades visuais apenas
+                        // quando a câmera parou, nunca a cada quadro de animação.
+                        if (!followMe) refreshRoadAlerts(force = true)
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
                             m.cameraPosition.target?.let { target ->
@@ -1431,6 +1465,8 @@ class MainActivity : Activity() {
         h.style = s
         h.lastMarkerPosition = null
         h.lastMarkerScreenBearing = Double.NaN
+        h.lastAlertDrawMs = 0L
+        h.lastAlertCenter = null
         // Desliga o fade padrao dos simbolos a cada atualização dos dados/tiles.
         s.setTransition(TransitionOptions(0L, 0L, false))
         if (isNightNow()) applyNightTheme(s)
@@ -1501,9 +1537,12 @@ class MainActivity : Activity() {
         )
         // Ícones claros e reconhecíveis, sem bolinhas genéricas.
         // Fora da rota discretos, na rota maiores; o próximo alerta ganha halo.
-        val next = Expression.eq(Expression.get("priority"), Expression.literal("next"))
+        val nextRadar = Expression.all(
+            Expression.eq(Expression.get("priority"), Expression.literal("next")),
+            Expression.eq(Expression.get("type"), Expression.literal("radar"))
+        )
         s.addLayer(
-            CircleLayer("next-hazard-halo", "alerts-src").withFilter(next).withProperties(
+            CircleLayer("next-hazard-halo", "alerts-src").withFilter(nextRadar).withProperties(
                 PropertyFactory.circleColor(0xFFFFC107.toInt()),
                 PropertyFactory.circleRadius(24f),
                 PropertyFactory.circleOpacity(0.22f),
@@ -1529,8 +1568,10 @@ class MainActivity : Activity() {
                         PropertyFactory.iconImage("ravo-alert-$kind"),
                         PropertyFactory.iconSize(scale),
                         PropertyFactory.iconOpacity(alpha),
-                        PropertyFactory.iconAllowOverlap(true),
-                        PropertyFactory.iconIgnorePlacement(true)
+                        // Somente o próximo alerta prioritário pode sobrepor
+                        // rótulos. Os demais respeitam o espaçamento do mapa.
+                        PropertyFactory.iconAllowOverlap(priority == "next"),
+                        PropertyFactory.iconIgnorePlacement(priority == "next")
                     )
                 )
             }
@@ -1559,8 +1600,8 @@ class MainActivity : Activity() {
                     PropertyFactory.iconImage(Expression.get("speedSign")),
                     PropertyFactory.iconSize(plateSize),
                     PropertyFactory.iconOffset(arrayOf(sideOffset, 0f)),
-                    PropertyFactory.iconAllowOverlap(true),
-                    PropertyFactory.iconIgnorePlacement(true),
+                    PropertyFactory.iconAllowOverlap(priority == "next"),
+                    PropertyFactory.iconIgnorePlacement(priority == "next"),
                     PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
                     PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT)
                 )
@@ -1588,7 +1629,15 @@ class MainActivity : Activity() {
         )
 
         refreshRoute(h)
-        alerts.setGeoJson(roadAlerts.features())
+        // A base de alertas é filtrada por viewport/zoom quando o estilo carrega.
+        val cp = h.map?.cameraPosition
+        val at = if (followMe) (mapFix ?: lastFix)?.let { LatLng(it.latitude, it.longitude) }
+            else cp?.target
+        alerts.setGeoJson(roadAlerts.features(
+            cp?.zoom ?: 15.0,
+            at?.latitude ?: 0.0,
+            at?.longitude ?: 0.0
+        ))
         (mapFix ?: lastFix)?.let { loc ->
             followCamera(h, loc, false)
             updateMeMarker(h, loc)
@@ -2027,6 +2076,8 @@ class MainActivity : Activity() {
                     .forEach { followCamera(it, loc, false) }
             }
         }
+        // O mapa que ficou oculto recebe os dados atualizados ao reaparecer.
+        if (mode == 0 || mode == 1) refreshRoadAlerts(force = true)
         if (mode == 2) refreshTripsList()
     }
 
