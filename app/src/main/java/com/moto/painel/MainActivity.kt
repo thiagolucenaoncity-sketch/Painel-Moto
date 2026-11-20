@@ -3427,7 +3427,7 @@ class MainActivity : Activity() {
             val metricsScroll = ScrollView(this).apply {
                 isFillViewport = true
                 isVerticalScrollBarEnabled = false
-                addView(right, LinearLayout.LayoutParams(MATCH, MATCH))
+                addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
             }
             val footer = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
