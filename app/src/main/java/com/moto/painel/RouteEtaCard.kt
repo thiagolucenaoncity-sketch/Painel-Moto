@@ -102,54 +102,57 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
      * a parte inferior da coluna da trip, com três blocos empilhados.
      * No retrato e no mapa completo o cartão continua horizontal.
      */
-    fun setLandscapeSidebar() {
+    fun setLandscapeSidebar(tight: Boolean = false) {
         orientation = VERTICAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(8), dp(8), dp(8), dp(8))
-        groups.forEach { group ->
+        val inset = if (tight) 3 else 6
+        setPadding(dp(inset), dp(inset), dp(inset), dp(inset))
+        // Guardar linhas compactas sem perder valores ou acessibilidade.
+        val labelSize = if (tight) 8.5f else 10f
+        val valueSize = if (tight) 16f else 19f
+        val iconSize = if (tight) 18f else 24f
+        val rowIconWidth = if (tight) 29 else 41
+        groups.forEachIndexed { index, group ->
             val params = group.layoutParams as LayoutParams
             params.width = LayoutParams.MATCH_PARENT
             params.height = LayoutParams.WRAP_CONTENT
             params.weight = 0f
-            params.topMargin = dp(3)
-            params.bottomMargin = dp(3)
+            params.topMargin = dp(if (tight) 1 else 3)
+            params.bottomMargin = dp(if (tight) 1 else 3)
             group.layoutParams = params
-            group.setPadding(dp(4), dp(5), dp(4), dp(5))
-        }
-        labels.forEach { it.textSize = 11f }
-        values.forEach {
-            it.textSize = 20f
-            it.setAutoSizeTextTypeUniformWithConfiguration(
-                13, 20, 1, TypedValue.COMPLEX_UNIT_SP
-            )
-        }
-        // Três seções bem separadas, ícones à esquerda e números em destaque.
-        val symbols = listOf("⚑", "◷", "⌖")
-        groups.forEachIndexed { index, group ->
             group.orientation = HORIZONTAL
             group.gravity = Gravity.CENTER_VERTICAL
+            group.setPadding(dp(2), dp(if (tight) 1 else 3), dp(2), dp(if (tight) 1 else 3))
             val symbol = TextView(context).apply {
-                text = symbols[index]
-                textSize = 26f
+                text = listOf("⚑", "◷", "⌖")[index]
+                textSize = iconSize
                 setTextColor(accentColor)
                 gravity = Gravity.CENTER
             }
-            group.addView(symbol, 0, LayoutParams(dp(46), dp(48)))
-            val descriptions = LinearLayout(context).apply {
+            // Recuperar label/valor dos grupos antes de realocar.
+            val title = labels[index]
+            val value = values[index]
+            group.removeView(title)
+            group.removeView(value)
+            val info = LinearLayout(context).apply {
                 orientation = VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
+                addView(title, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+                addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             }
-            val label = labels[index]
-            val value = values[index]
-            group.removeView(label)
-            group.removeView(value)
-            descriptions.addView(label, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            descriptions.addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-            group.addView(descriptions, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-            if (index < groups.lastIndex) {
-                val divider = View(context).apply { setBackgroundColor(0x665B7897) }
-                addView(divider, index * 2 + 1, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)))
-            }
+            title.textSize = labelSize
+            value.textSize = valueSize
+            value.setAutoSizeTextTypeUniformWithConfiguration(
+                if (tight) 11 else 12, valueSize.toInt(), 1, TypedValue.COMPLEX_UNIT_SP
+            )
+            group.addView(symbol, LayoutParams(dp(rowIconWidth), dp(if (tight) 32 else 43)))
+            group.addView(info, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        }
+        // Divisórias entre linhas (no cartão, nunca inseridas fora dos limites dos grupos).
+        for (index in 0 until groups.lastIndex) {
+            val divider = View(context).apply { setBackgroundColor(0x665B7897) }
+            addView(divider, index * 2 + 1,
+                LayoutParams(LayoutParams.MATCH_PARENT, dp(1)))
         }
     }
 
