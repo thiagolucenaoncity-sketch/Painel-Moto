@@ -3230,6 +3230,7 @@ class MainActivity : Activity() {
 
     // Tela do mapa em tela cheia: o mapa ocupa tudo e os controles ficam flutuando por cima
     private fun buildMapScreen(): FrameLayout {
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val frame = FrameLayout(this).apply { setBackgroundColor(0xFF06142B.toInt()) }
 
         // Mapa ocupa 100% da área
@@ -3239,7 +3240,7 @@ class MainActivity : Activity() {
         frame.addView(roadLimitPlate(false), FrameLayout.LayoutParams(WRAP, WRAP,
             Gravity.BOTTOM or Gravity.START).apply {
                 leftMargin = px(16)
-                bottomMargin = px(195)
+                bottomMargin = px(if (landscape) 130 else 195)
             })
         offlineNotice = label(12f, Color.WHITE, bold = true).apply {
             text = "SEM INTERNET · mapa salvo / cache"
@@ -3248,7 +3249,7 @@ class MainActivity : Activity() {
             visibility = if (isConnected == false) View.VISIBLE else View.GONE
         }
         frame.addView(offlineNotice, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-            topMargin = px(104)
+            topMargin = px(if (landscape) 60 else 104)
         })
 
         // ----- Topo: pesquisa minimalista, favoritos e cartão de instrução -----
@@ -3256,12 +3257,12 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = floatBg()
-            setPadding(px(12), 0, px(4), 0)
+            setPadding(px(if (landscape) 8 else 12), 0, px(4), 0)
         }
         searchBox.addView(
             TextView(this).apply {
                 text = "⌕"
-                textSize = 18f
+                textSize = if (landscape) 15f else 18f
                 setTextColor(cLabel)
             },
             LinearLayout.LayoutParams(WRAP, WRAP).apply { rightMargin = px(8) }
@@ -3270,10 +3271,11 @@ class MainActivity : Activity() {
             hint = "Pesquisar"
             setHintTextColor(GRAY)
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = if (landscape) 13f else 15f
             background = null
             setSingleLine(true)
-            setPadding(0, px(10), 0, px(10))
+            setPadding(0, px(if (landscape) 4 else 10), 0,
+                px(if (landscape) 4 else 10))
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             addTextChangedListener(searchWatcher)
             setOnEditorActionListener { _, actionId, _ ->
@@ -3286,7 +3288,8 @@ class MainActivity : Activity() {
         searchBox.addView(searchInput, LinearLayout.LayoutParams(0, WRAP, 1f))
         searchBox.addView(
             floatBtn("★") { toggleFavRow() },
-            LinearLayout.LayoutParams(px(40), px(40))
+            LinearLayout.LayoutParams(px(if (landscape) 34 else 40),
+                px(if (landscape) 34 else 40))
         )
 
         // Sugestões (aparecem enquanto você digita)
@@ -3310,7 +3313,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
-            setPadding(px(6), px(4), px(6), px(4))
+            setPadding(px(6), px(if (landscape) 2 else 4),
+                px(6), px(if (landscape) 2 else 4))
             visibility = View.GONE
             addView(favScroll, LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(addFavBtn, LinearLayout.LayoutParams(px(40), px(40)))
@@ -3318,17 +3322,22 @@ class MainActivity : Activity() {
 
         // Cartão compacto: ícone de manobra vetorial + rua + distância.
         // Mantém o nome real fornecido pelo OSRM, sem inventar ruas.
-        mapInstructionView = label(16f, Color.WHITE, bold = true).apply {
-            maxLines = 2
+        mapInstructionView = label(if (landscape) 13f else 16f,
+            Color.WHITE, bold = true).apply {
+            maxLines = if (landscape) 1 else 2
             ellipsize = TextUtils.TruncateAt.END
         }
-        mapInfoView = label(12f, cClock).apply {
+        mapInfoView = label(if (landscape) 10f else 12f, cClock).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        mapManeuverDistance = label(16f, accent, bold = true, align = Gravity.END).apply {
+        mapManeuverDistance = label(if (landscape) 13f else 16f,
+            accent, bold = true, align = Gravity.END).apply {
             maxLines = 1
-            setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, TypedValue.COMPLEX_UNIT_SP)
+            setAutoSizeTextTypeUniformWithConfiguration(
+                if (landscape) 10 else 12, if (landscape) 13 else 16,
+                1, TypedValue.COMPLEX_UNIT_SP
+            )
         }
         mapManeuverIcon = ManeuverIconView(this, accent)
         val maneuverTitle = LinearLayout(this).apply {
@@ -3340,31 +3349,49 @@ class MainActivity : Activity() {
         val maneuverRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(mapManeuverIcon, LinearLayout.LayoutParams(px(50), px(50)).apply {
-                rightMargin = px(8)
+            addView(mapManeuverIcon, LinearLayout.LayoutParams(
+                px(if (landscape) 34 else 50), px(if (landscape) 34 else 50)
+            ).apply {
+                rightMargin = px(if (landscape) 5 else 8)
             })
             addView(maneuverTitle, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(mapManeuverDistance, LinearLayout.LayoutParams(px(76), WRAP).apply {
-                leftMargin = px(8)
-            })
+            addView(mapManeuverDistance,
+                LinearLayout.LayoutParams(px(if (landscape) 65 else 76), WRAP).apply {
+                    leftMargin = px(if (landscape) 4 else 8)
+                })
         }
         instrCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
-            setPadding(px(12), px(8), px(12), px(8))
+            setPadding(px(if (landscape) 8 else 12), px(if (landscape) 4 else 8),
+                px(if (landscape) 8 else 12), px(if (landscape) 4 else 8))
             visibility = View.GONE
             addView(maneuverRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
         val topCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(12), px(12), px(12), 0)
-            addView(searchBox, LinearLayout.LayoutParams(MATCH, px(48)))
-            addView(suggestScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
-            addView(favRowView, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
-            addView(instrCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(6) })
+            setPadding(px(if (landscape) 8 else 12),
+                px(if (landscape) 5 else 12),
+                px(if (landscape) 8 else 12), 0)
+            addView(searchBox, LinearLayout.LayoutParams(
+                MATCH, px(if (landscape) 36 else 48)))
+            addView(suggestScroll, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = px(if (landscape) 3 else 6)
+            })
+            addView(favRowView, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = px(if (landscape) 3 else 6)
+            })
+            addView(instrCard, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                topMargin = px(if (landscape) 3 else 6)
+            })
         }
-        frame.addView(topCol, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP))
+        // Barra e instruções deixam a lateral direita do mapa livre na paisagem.
+        // Com medidas em px reais a largura também respeita a densidade do Android.
+        val topWidth = if (landscape) (resources.displayMetrics.widthPixels * 0.74f).toInt()
+            .coerceAtLeast(px(350)) else MATCH
+        frame.addView(topCol,
+            FrameLayout.LayoutParams(topWidth, WRAP, Gravity.TOP or Gravity.START))
         // Ao abrir/fechar favoritos, sugestões ou orientação, o bloco superior
         // muda de altura: o player desce/sube sem sobrepor conteúdo.
         topCol.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -3414,11 +3441,14 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = if (mapToolsExpanded) View.VISIBLE else View.GONE
-            addView(voiceBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
-            addView(mapStyleBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
-            addView(mapTiltBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
-            addView(mapRotateBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
-            addView(offlineSaveBtn, LinearLayout.LayoutParams(px(46), px(46)).apply { topMargin = px(9) })
+            val toolSize = px(if (landscape) 36 else 46)
+            val toolMargin = px(if (landscape) 4 else 9)
+            listOf(voiceBtn, mapStyleBtn, mapTiltBtn, mapRotateBtn, offlineSaveBtn)
+                .forEach { tool ->
+                    addView(tool, LinearLayout.LayoutParams(toolSize, toolSize).apply {
+                        topMargin = toolMargin
+                    })
+                }
         }
         mapToolsMenuBtn = floatBtn(if (mapToolsExpanded) "✕" else "☰") {
             mapToolsExpanded = !mapToolsExpanded
@@ -3428,14 +3458,15 @@ class MainActivity : Activity() {
                 if (mapToolsExpanded) "Fechar ferramentas do mapa" else "Abrir ferramentas do mapa"
             mapToolsDock.post { positionMapTools() }
         }.apply {
-            textSize = 25f
+            textSize = if (landscape) 21f else 25f
             contentDescription = if (mapToolsExpanded) "Fechar ferramentas do mapa"
                 else "Abrir ferramentas do mapa"
         }
         mapToolsDock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            addView(mapToolsMenuBtn, LinearLayout.LayoutParams(px(52), px(52)))
+            addView(mapToolsMenuBtn, LinearLayout.LayoutParams(
+                px(if (landscape) 44 else 52), px(if (landscape) 44 else 52)))
             addView(mapToolsColumn, LinearLayout.LayoutParams(WRAP, WRAP))
             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 post { positionMapTools() }
@@ -3444,7 +3475,7 @@ class MainActivity : Activity() {
         frame.addView(
             mapToolsDock,
             FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
-                rightMargin = px(12)
+                rightMargin = px(if (landscape) 8 else 12)
             }
         )
         mapToolsDock.post { positionMapTools() }
@@ -3458,10 +3489,13 @@ class MainActivity : Activity() {
         val leftControls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
-            addView(backBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
-                bottomMargin = px(24)
+            addView(backBtn, LinearLayout.LayoutParams(
+                px(if (landscape) 42 else 50),
+                px(if (landscape) 42 else 50)).apply {
+                bottomMargin = px(if (landscape) 14 else 24)
             })
-            addView(gpsBtn, LinearLayout.LayoutParams(px(62), px(62)))
+            addView(gpsBtn, LinearLayout.LayoutParams(
+                px(if (landscape) 48 else 62), px(if (landscape) 48 else 62)))
         }
         cancelBtn = floatBtn("✕") { confirmCancelRoute() }.apply {
             background = box(this@MainActivity, 0xEE45202A.toInt(), 16, 0xFFFF8080.toInt())
@@ -3469,22 +3503,27 @@ class MainActivity : Activity() {
         }
 
         // Faixa de tempo, distância e chegada permanece entre os controles.
-        fullEtaCard = RouteEtaCard(this, accent)
+        fullEtaCard = RouteEtaCard(this, accent).apply {
+            setCompact(landscape)
+        }
         val controlsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
-            addView(leftControls, LinearLayout.LayoutParams(px(62), WRAP).apply {
-                gravity = Gravity.BOTTOM
-            })
+            addView(leftControls,
+                LinearLayout.LayoutParams(px(if (landscape) 48 else 62), WRAP).apply {
+                    gravity = Gravity.BOTTOM
+                })
             addView(fullEtaCard, LinearLayout.LayoutParams(0, WRAP, 1f).apply {
-                leftMargin = px(8)
-                rightMargin = px(8)
+                leftMargin = px(if (landscape) 5 else 8)
+                rightMargin = px(if (landscape) 5 else 8)
                 gravity = Gravity.BOTTOM
-                bottomMargin = px(5)
+                bottomMargin = px(if (landscape) 3 else 5)
             })
-            addView(cancelBtn, LinearLayout.LayoutParams(px(50), px(50)).apply {
+            addView(cancelBtn, LinearLayout.LayoutParams(
+                px(if (landscape) 44 else 50),
+                px(if (landscape) 44 else 50)).apply {
                 gravity = Gravity.BOTTOM
-                bottomMargin = px(6)
+                bottomMargin = px(if (landscape) 3 else 6)
             })
         }
         // Créditos ficam junto à faixa de atribuição MapLibre, no rodapé,
@@ -3496,7 +3535,8 @@ class MainActivity : Activity() {
         }
         val bottomCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(12), 0, px(12), px(3))
+            setPadding(px(if (landscape) 7 else 12), 0,
+                px(if (landscape) 7 else 12), px(3))
             addView(controlsRow, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(attrib, LinearLayout.LayoutParams(MATCH, WRAP))
         }
