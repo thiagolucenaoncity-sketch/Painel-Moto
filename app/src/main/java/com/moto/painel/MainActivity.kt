@@ -314,6 +314,11 @@ class EqualizerView(ctx: Context) : View(ctx) {
 class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
+    // Verifica versões públicas apenas ao abrir o RAVO; sem polling do GPS.
+    // Evita alertas de instalação enquanto há navegação em andamento.
+    private val ravoUpdaterLazy = lazy { RavoUpdater(this) { !hasRoute() } }
+    private val ravoUpdater: RavoUpdater get() = ravoUpdaterLazy.value
+    private fun updaterLazyInitialized(): Boolean = ravoUpdaterLazy.isInitialized()
     // MapView precisa receber exatamente os eventos reais de Activity.
     // Não iniciar dois renderizadores juntos nem duplicar onStart/onResume.
     private var activityStarted = false
@@ -928,9 +933,11 @@ class MainActivity : Activity() {
         handler.post(tick)
         handler.post(pollSessions)
         handler.post(eqTick)
+        ravoUpdater.onResume()
     }
 
     override fun onPause() {
+        if (updaterLazyInitialized()) ravoUpdater.onPause()
         activityResumed = false
         syncMapLifecycle()
         handler.removeCallbacksAndMessages(null)
@@ -953,6 +960,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (updaterLazyInitialized()) ravoUpdater.close()
         locationManager.removeUpdates(locationListener)
         controller?.unregisterCallback(mediaCallback)
         tts?.shutdown()

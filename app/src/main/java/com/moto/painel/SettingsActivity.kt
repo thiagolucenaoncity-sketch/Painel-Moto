@@ -32,6 +32,23 @@ class SettingsActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private val accent: Int get() = Prefs.accentColor(this)
+    private val ravoUpdater by lazy { RavoUpdater(this) }
+
+    override fun onResume() {
+        super.onResume()
+        // Nas configurações, consulta à internet apenas após tocar no botão.
+        ravoUpdater.onResume(checkAutomatically = false)
+    }
+
+    override fun onPause() {
+        ravoUpdater.onPause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        ravoUpdater.close()
+        super.onDestroy()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +90,9 @@ class SettingsActivity : Activity() {
             add(col, menuBtn("Abertura do app", R.drawable.ravo_menu_play) { go("abertura") }, 10)
             add(col, menuBtn("Unidades", R.drawable.ravo_menu_ruler) { go("unidades") }, 10)
             add(col, menuBtn("Veículo", R.drawable.ravo_menu_bike) { go("veiculo") }, 10)
+            add(col, plainBtn("Verificar atualização do RAVO") {
+                ravoUpdater.checkNow(force = true)
+            }, 18)
             add(col, plainBtn("Voltar ao painel") { finish() }, 24)
         } else {
             when (section) {

@@ -7,6 +7,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,3 +72,36 @@ jobs:
         with:
           name: ravo-apk
           path: RAVO_*.apk
+
+  # Artifact do Actions expira e pode exigir login. Releases públicas
+  # fornecem um APK estável e acessível pelo próprio aplicativo.
+  publish:
+    name: Publicar atualização assinada
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: ravo-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ravo-apk
+
+      - name: Criar GitHub Release com APK assinado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v1.1.${GITHUB_RUN_NUMBER}"
+          apk="RAVO_atualizavel_v1.1.${GITHUB_RUN_NUMBER}.apk"
+          test -s "$apk"
+          gh release create "$tag" "$apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "RAVO $tag" \
+            --notes "APK oficial do RAVO com assinatura permanente. O aplicativo pode oferecer esta atualização ao ser aberto. A instalação exige confirmação do Android." \
+            --latest
