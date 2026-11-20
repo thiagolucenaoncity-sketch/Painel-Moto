@@ -15,6 +15,11 @@ import android.widget.TextView
  * não anima e não pisca quando GPS/ETA são atualizados.
  */
 internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(context) {
+    // Perfil próprio de paisagem, sem alterar a altura do cartão no retrato.
+    private val labels = mutableListOf<TextView>()
+    private val values = mutableListOf<TextView>()
+    private val groups = mutableListOf<LinearLayout>()
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun field(caption: String): Pair<LinearLayout, TextView> {
@@ -32,6 +37,8 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
             gravity = Gravity.CENTER
             maxLines = 1
         }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        labels.add(container.getChildAt(0) as TextView)
+        groups.add(container)
         val value = TextView(context).apply {
             text = "—"
             textSize = 16f
@@ -44,6 +51,7 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
             setAutoSizeTextTypeUniformWithConfiguration(10, 16, 1, TypedValue.COMPLEX_UNIT_SP)
         }
         container.addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        values.add(value)
         return container to value
     }
 
@@ -67,6 +75,25 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
             addView(group, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         }
         visibility = View.GONE
+    }
+
+    fun setCompact(compact: Boolean) {
+        if (!compact) return
+        setPadding(dp(6), dp(3), dp(6), dp(3))
+        labels.forEach {
+            it.textSize = 8f
+            it.letterSpacing = 0.03f
+            it.includeFontPadding = false
+        }
+        values.forEach {
+            it.textSize = 13f
+            it.includeFontPadding = false
+            it.setAutoSizeTextTypeUniformWithConfiguration(
+                10, 13, 1, TypedValue.COMPLEX_UNIT_SP
+            )
+        }
+        groups.forEach { it.setPadding(dp(2), 0, dp(2), 0) }
+        minimumHeight = 0
     }
 
     fun render(arrival: String, duration: String, kilometers: String) {
