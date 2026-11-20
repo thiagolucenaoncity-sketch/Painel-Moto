@@ -1361,7 +1361,7 @@ class MainActivity : Activity() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val buttonSize = px(when {
             screenMode == 0 && landscape -> 32
-            screenMode == 0 -> 42
+            screenMode == 0 -> 34 // Player compacto no cabeçalho retrato
             landscape -> 44
             else -> 56
         })
@@ -1392,9 +1392,8 @@ class MainActivity : Activity() {
         parent.getLocationOnScreen(parentCoords)
 
         val anchorY = if (screenMode == 0 && ::vehicleView.isInitialized) {
-            // Paisagem: o player ocupa o espaço reservado ao lado do relógio.
-            // Retrato: mantém a posição antiga na linha da moto.
-            val anchor = if (landscape) clockView else vehicleView
+            // Nas duas orientações, o player acompanha o relógio.
+            val anchor = clockView
             val coords = IntArray(2)
             anchor.getLocationOnScreen(coords)
             val height = anchor.height.takeIf { it > 0 } ?: px(36)
@@ -1411,11 +1410,11 @@ class MainActivity : Activity() {
             (coords[1] - parentCoords[1] + anchor.height + px(12)).toFloat()
         } else px(80).toFloat()
 
-        val left = if (screenMode == 0 && landscape) {
+        val left = if (screenMode == 0) {
             val clockCoords = IntArray(2)
             clockView.getLocationOnScreen(clockCoords)
-            clockCoords[0] - parentCoords[0] + clockView.width + px(6)
-        } else px(if (screenMode == 0) 16 else if (landscape) 12 else 24)
+            clockCoords[0] - parentCoords[0] + clockView.width + px(if (landscape) 6 else 5)
+        } else px(if (landscape) 12 else 24)
         val maxLeft = (parent.width - if (musicOpen) popupWidth else buttonSize)
             .coerceAtLeast(px(8))
         val contentHeight = buttonSize + if (musicOpen) {
@@ -2634,15 +2633,15 @@ class MainActivity : Activity() {
         val gaugeText = dashboardGaugeText ?: return
         val portrait = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
         val navigating = panelManeuverOverlay?.visibility == View.VISIBLE
-        // Velocímetro e faixa de instruções compartilham a linha superior.
-        val gaugeTop = px(7)
+        // Paisagem inalterada; no retrato a moto ganha área livre acima do velocímetro.
+        val gaugeTop = if (portrait) px(if (navigating) 78 else 7) else px(7)
         val arcParams = arcView.layoutParams as? FrameLayout.LayoutParams ?: return
         if (arcParams.topMargin != gaugeTop) {
             arcParams.topMargin = gaugeTop
             arcView.layoutParams = arcParams
         }
         val textParams = gaugeText.layoutParams as? FrameLayout.LayoutParams ?: return
-        val textTop = gaugeTop + px(if (portrait) 31 else 34)
+        val textTop = gaugeTop + px(if (portrait) 21 else 34)
         if (textParams.topMargin != textTop) {
             textParams.topMargin = textTop
             gaugeText.layoutParams = textParams
@@ -2882,8 +2881,8 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             // Na paisagem o minimapa desce até quase a borda inferior útil.
-            setPadding(px(if (landscape) 5 else 12), px(if (landscape) 2 else 8),
-                px(if (landscape) 5 else 12), px(if (landscape) 1 else 9))
+            setPadding(px(if (landscape) 5 else 6), px(if (landscape) 2 else 3),
+                px(if (landscape) 5 else 6), px(if (landscape) 1 else 4))
         }
 
         // Barra superior: relógio, GPS e, à direita, data e bateria
@@ -2891,9 +2890,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        clockView = label(if (landscape) 16f else 20f, cClock, bold = true, mono = true)
-        gpsView = label(if (landscape) 10f else 12f, cLabel, align = Gravity.CENTER)
-        dateView = label(if (landscape) 10f else 12f, cLabel, align = Gravity.END)
+        clockView = label(if (landscape) 16f else 17f, cClock, bold = true, mono = true)
+        gpsView = label(if (landscape) 10f else 10f, cLabel, align = Gravity.CENTER)
+        dateView = label(if (landscape) 10f else 10f, cLabel, align = Gravity.END)
         batteryView = BatteryStatusView(this, cLabel)
         val rightCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2901,9 +2900,22 @@ class MainActivity : Activity() {
             addView(dateView, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(batteryView, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        topBar.addView(clockView, LinearLayout.LayoutParams(0, WRAP, 1f))
-        topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
-        topBar.addView(rightCol, LinearLayout.LayoutParams(0, WRAP, 1f))
+        if (!landscape) {
+            // Reserva física para o player flutuante, sem nova linha vertical.
+            val timeDock = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(clockView, LinearLayout.LayoutParams(WRAP, WRAP))
+                addView(View(this@MainActivity), LinearLayout.LayoutParams(px(38), px(34)))
+            }
+            topBar.addView(timeDock, LinearLayout.LayoutParams(WRAP, WRAP))
+            topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1f))
+            topBar.addView(rightCol, LinearLayout.LayoutParams(WRAP, WRAP))
+        } else {
+            topBar.addView(clockView, LinearLayout.LayoutParams(0, WRAP, 1f))
+            topBar.addView(gpsView, LinearLayout.LayoutParams(0, WRAP, 1.6f))
+            topBar.addView(rightCol, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
 
         // Cartao de chegada acima do velocimetro, visivel somente na navegacao.
         panelEtaCard = RouteEtaCard(this, accent).apply {
@@ -2914,12 +2926,12 @@ class MainActivity : Activity() {
         }
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
-        nickView = label(if (landscape) 13f else 20f,
+        nickView = label(if (landscape) 13f else 16f,
             accent, bold = true, align = Gravity.CENTER).apply {
             text = nick
             visibility = if (nick.isEmpty()) View.GONE else View.VISIBLE
         }
-        modelView = label(if (landscape) 9f else 12f, cLabel, align = Gravity.CENTER).apply {
+        modelView = label(if (landscape) 9f else 10f, cLabel, align = Gravity.CENTER).apply {
             text = brandModel
             visibility = if (brandModel.isEmpty()) View.GONE else View.VISIBLE
         }
@@ -2949,7 +2961,7 @@ class MainActivity : Activity() {
         arcView.setDashboardLook(ravoGauge, accent)
         speedView = label(
             if (digital) (if (landscape) 44f else 120f)
-            else (if (ravoGauge) (if (landscape) 49f else 42f) else if (landscape) 31f else 84f),
+            else (if (ravoGauge) (if (landscape) 49f else 32f) else if (landscape) 31f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2962,7 +2974,7 @@ class MainActivity : Activity() {
                 setShadowLayer(pxF(7f), 0f, 0f, accent)
             }
         }
-        unitView = label(if (ravoGauge) (if (landscape) 14f else 12f) else if (landscape) 10f else 16f,
+        unitView = label(if (ravoGauge) (if (landscape) 14f else 10f) else if (landscape) 10f else 16f,
             cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2975,7 +2987,7 @@ class MainActivity : Activity() {
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, if (ravoGauge) {
-                val size = px(if (landscape) 164 else 146)
+                val size = px(if (landscape) 164 else 108)
                 FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.START).apply {
                     leftMargin = px(8)
                     topMargin = px(10)
@@ -2987,9 +2999,9 @@ class MainActivity : Activity() {
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, if (ravoGauge) {
-                val size = px(if (landscape) 164 else 146)
+                val size = px(if (landscape) 164 else 108)
                 FrameLayout.LayoutParams(size, WRAP, Gravity.TOP or Gravity.START).apply {
-                    topMargin = px(if (landscape) 41 else 38)
+                    topMargin = px(if (landscape) 41 else 28)
                     leftMargin = px(8)
                 }
             } else if (landscape) {
@@ -3002,7 +3014,7 @@ class MainActivity : Activity() {
             // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
                 Gravity.TOP or Gravity.START).apply {
-                    topMargin = px(if (ravoGauge) (if (landscape) 182 else 163) else if (landscape) 54 else 8)
+                    topMargin = px(if (ravoGauge) (if (landscape) 182 else 122) else if (landscape) 54 else 8)
                     leftMargin = px(8)
                 })
         }
@@ -3329,12 +3341,15 @@ class MainActivity : Activity() {
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val h = px(if (landscape) 34 else 40)
+            val h = px(if (landscape) 34 else 57)
             val w = px(if (landscape) 36 else 44)
             if (!landscape) {
-                addView(mapBtn, LinearLayout.LayoutParams(w, h))
-                addView(View(this@MainActivity), LinearLayout.LayoutParams(0, h, 1f))
-                addView(tripsBtn, LinearLayout.LayoutParams(w, h))
+                addView(mapBtn, LinearLayout.LayoutParams(w, px(44)))
+                addView(panelEtaCard, LinearLayout.LayoutParams(0, h, 1f).apply {
+                    leftMargin = px(5)
+                    rightMargin = px(5)
+                })
+                addView(tripsBtn, LinearLayout.LayoutParams(w, px(44)))
             }
         }
 
@@ -3475,18 +3490,23 @@ class MainActivity : Activity() {
             // os números do velocímetro no mapa maior.
             root.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
             root.addView(vehicleRow, gap(0))
-            // Retrato: faixa flutuante no mapa, velocímetro imediatamente
-            // abaixo dela e acessos mapa/trips fora do cartão de navegação.
+            // Retrato: faixa de instruções em toda a largura do minimapa;
+            // velocímetro pequeno na esquerda, logo abaixo quando há rota.
+            miniManeuver.layoutParams = null
+            navView.maxLines = 2
+            navView.isSingleLine = false
+            navView.setAutoSizeTextTypeUniformWithConfiguration(
+                11, 15, 1, TypedValue.COMPLEX_UNIT_SP
+            )
             arcBlock.addView(miniManeuver,
-                FrameLayout.LayoutParams(MATCH, px(68), Gravity.TOP or Gravity.START).apply {
-                    leftMargin = px(if (ravoGauge) 163 else 7)
-                    rightMargin = px(7)
-                    topMargin = px(14)
+                FrameLayout.LayoutParams(MATCH, px(67), Gravity.TOP or Gravity.START).apply {
+                    leftMargin = px(5)
+                    rightMargin = px(5)
+                    topMargin = px(5)
                 })
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            // ETA abaixo do mapa, como na referência aprovada para retrato.
-            root.addView(panelEtaCard, gap(4))
-            root.addView(navRow, gap(4))
+            // ETA fino entre Mapa e Trips, economizando uma linha inteira.
+            root.addView(navRow, gap(2))
             root.addView(tripHeader, gap(2))
             root.addView(statsBox, gap(2))
             root.addView(tripRow, gap(4))
