@@ -3497,12 +3497,17 @@ class MainActivity : Activity() {
             navView.setAutoSizeTextTypeUniformWithConfiguration(
                 11, 15, 1, TypedValue.COMPLEX_UNIT_SP
             )
-            arcBlock.addView(miniManeuver,
-                FrameLayout.LayoutParams(MATCH, px(67), Gravity.TOP or Gravity.START).apply {
-                    leftMargin = px(5)
-                    rightMargin = px(5)
-                    topMargin = px(5)
-                })
+            // Nunca atribuir null a layoutParams: em Android isso causa
+            // NullPointerException ainda na inicialização da MainActivity.
+            val portraitManeuverParams = FrameLayout.LayoutParams(
+                MATCH, px(67), Gravity.TOP or Gravity.START
+            ).apply {
+                leftMargin = px(5)
+                rightMargin = px(5)
+                topMargin = px(5)
+            }
+            miniManeuver.layoutParams = portraitManeuverParams
+            arcBlock.addView(miniManeuver)
             root.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
             // ETA fino entre Mapa e Trips, economizando uma linha inteira.
             root.addView(navRow, gap(2))
