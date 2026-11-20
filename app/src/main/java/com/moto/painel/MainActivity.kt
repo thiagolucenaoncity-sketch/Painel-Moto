@@ -3048,10 +3048,14 @@ class MainActivity : Activity() {
             resetBtn.textSize = 11f
             resetBtn.contentDescription = "Zerar trip"
         }
-        tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, tripHeight, 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
-        tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(if (landscape) 32 else 36), tripHeight).apply { setMargins(0, 0, px(2), 0) })
-        tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, tripHeight, 1.00f).apply { setMargins(0, 0, px(2), 0) })
-        tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, tripHeight, 1.00f).apply { setMargins(0, 0, px(2), 0) })
+        // No retrato cada botão pertence a outra linha. Nunca atribuir
+        // dois pais ao mesmo View: isso encerraria o aplicativo na abertura.
+        if (landscape) {
+            tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, tripHeight, 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
+            tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(32), tripHeight).apply { setMargins(0, 0, px(2), 0) })
+            tripRow.addView(saveBtn, LinearLayout.LayoutParams(0, tripHeight, 1.00f).apply { setMargins(0, 0, px(2), 0) })
+            tripRow.addView(resetBtn, LinearLayout.LayoutParams(0, tripHeight, 1.00f).apply { setMargins(0, 0, px(2), 0) })
+        }
 
         // Player: capa, título e artista (fica dentro do painel flutuante)
         val card = LinearLayout(this).apply {
