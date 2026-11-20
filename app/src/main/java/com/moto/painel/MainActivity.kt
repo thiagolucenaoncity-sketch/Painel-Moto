@@ -414,6 +414,8 @@ class MainActivity : Activity() {
     // Painel
     private lateinit var panelScreen: LinearLayout
     private lateinit var panelEtaCard: RouteEtaCard
+    // Overlay de manobra: sem rota não deve cobrir a área útil do minimapa.
+    private var panelManeuverOverlay: LinearLayout? = null
     private lateinit var minimap: MapView
     private lateinit var clockView: TextView
     private lateinit var dateView: TextView
@@ -2180,8 +2182,14 @@ class MainActivity : Activity() {
     private fun refreshEtaPanels() {
         if (!::panelEtaCard.isInitialized || !::fullEtaCard.isInitialized) return
         if (!etaActive || routeDest == null) {
+            val layoutChanged = panelEtaCard.visibility != View.GONE || fullEtaCard.visibility != View.GONE
             panelEtaCard.visibility = View.GONE
             fullEtaCard.visibility = View.GONE
+            // GONE libera a área dos cartões para os demais elementos do layout.
+            if (layoutChanged) {
+                panelScreen.requestLayout()
+                mapScreen.requestLayout()
+            }
             return
         }
         val minuteCount = ceil(etaRemainingSeconds.coerceAtLeast(0.0) / 60.0)
@@ -2196,9 +2204,14 @@ class MainActivity : Activity() {
         )
         panelEtaCard.render(arrival, durationText, distanceText)
         fullEtaCard.render(arrival, durationText, distanceText)
+        val layoutChanged = panelEtaCard.visibility != View.VISIBLE || fullEtaCard.visibility != View.VISIBLE
         panelEtaCard.visibility = View.VISIBLE
         // Previsao visivel e fixa na faixa inferior, independente da camera.
         fullEtaCard.visibility = View.VISIBLE
+        if (layoutChanged) {
+            panelScreen.requestLayout()
+            mapScreen.requestLayout()
+        }
     }
 
     private fun onFix(loc: Location) {
@@ -2536,6 +2549,10 @@ class MainActivity : Activity() {
         cancelBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         addFavBtn.visibility = if (hasRoute()) View.VISIBLE else View.GONE
         instrCard.visibility = if (hasRoute() && mapInstructionView.text.isNotEmpty()) View.VISIBLE else View.GONE
+        // Ao encerrar a rota, libera totalmente o topo do minimapa;
+        // ao iniciar, restaura apenas a instrução realmente disponível.
+        panelManeuverOverlay?.visibility = if (hasRoute() && navView.text.isNotBlank())
+            View.VISIBLE else View.GONE
         // Ao mudar rota/instrução, os controles seguem a altura real do topo.
         musicDock.post { applyFabLayout() }
         if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
@@ -3190,6 +3207,8 @@ class MainActivity : Activity() {
             })
             addView(miniNavText, LinearLayout.LayoutParams(0, WRAP, 1f))
         }
+        panelManeuverOverlay = miniManeuver
+        miniManeuver.visibility = View.GONE
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
