@@ -43,6 +43,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -138,7 +139,16 @@ private fun box(ctx: Context, color: Int, radiusDp: Int, strokeColor: Int? = nul
     if (strokeColor != null) setStroke(ctx.px(1), strokeColor)
 }
 
-private class Step(val lat: Double, val lon: Double, val text: String, val distanceM: Double)
+private class Step(
+    val lat: Double,
+    val lon: Double,
+    val text: String,        // frase completa somente para áudio/TTS
+    val distanceM: Double,
+    val road: String,
+    val maneuverType: String,
+    val maneuverModifier: String,
+    val exitNumber: Int
+)
 
 // Sugestão de endereço (aparece enquanto você digita)
 private class Suggest(val name: String, val lat: Double, val lon: Double)
@@ -416,6 +426,8 @@ class MainActivity : Activity() {
     private lateinit var fullRoadLimitIcon: ImageView
     private var currentRoadLimit: Int? = null
     private lateinit var navView: TextView
+    private lateinit var panelManeuverIcon: ManeuverIconView
+    private lateinit var panelManeuverDistance: TextView
     private lateinit var tripHeader: TextView
     private lateinit var distView: TextView
     private lateinit var timeView: TextView
@@ -442,6 +454,8 @@ class MainActivity : Activity() {
     private lateinit var instrCard: LinearLayout
     private lateinit var mapInstructionView: TextView
     private lateinit var mapInfoView: TextView
+    private lateinit var mapManeuverIcon: ManeuverIconView
+    private lateinit var mapManeuverDistance: TextView
     private lateinit var voiceBtn: Button
     private lateinit var mapStyleBtn: Button
     private lateinit var mapTiltBtn: Button
@@ -1911,8 +1925,34 @@ class MainActivity : Activity() {
             toast("Aguardando sinal do GPS...")
             return
         }
+        closeNavigationSearchOverlays()
+        // Já ao selecionar um destino retorna ao zoom de condução. A rota
+        // ainda será validada quando chegar a resposta do OSRM.
+        followMe = true
+        (mapFix ?: origin).let { position ->
+            holders.filter { it.interactive == (screenMode == 1) }
+                .forEach { followCamera(it, position, false) }
+        }
         toast("Buscando rota...")
         fetchRoute(origin, lat, lon, name.take(60), false)
+    }
+
+    private fun closeNavigationSearchOverlays() {
+        // O favorito era mantido aberto mesmo depois de selecionado e
+        // a busca pendente podia reabrir sugestões sobre a rota.
+        handler.removeCallbacks(suggestRunnable)
+        suggestSeq++
+        skipSuggest = false
+        hideSuggestions()
+        if (::favRowView.isInitialized) favRowView.visibility = View.GONE
+        if (::searchInput.isInitialized) {
+            val keyboard = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            keyboard?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            searchInput.clearFocus()
+        }
+        // O player e o menu lateral direito seguem o novo topo automaticamente.
+        if (::musicDock.isInitialized) musicDock.post { applyFabLayout() }
+        if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
     }
 
     // ---------- Favoritos (endereço + apelido) ----------
@@ -2151,14 +2191,18 @@ class MainActivity : Activity() {
             announcedNear = false
             if (stepIndex < steps.size) {
                 val next = steps[stepIndex]
-                showInstruction(next.text, "")
+                val nextMeters = distance(loc.latitude, loc.longitude, next.lat, next.lon)
+                showManeuver(next, nextMeters)
                 say(next.text)
             } else {
                 // A rota pode continuar desenhada, mas os dados de ETA somem ao chegar.
                 roadAlerts.stopNavigation()
                 etaActive = false
                 refreshEtaPanels()
-                showInstruction("Você chegou ao destino", "")
+                showManeuver(
+                    Step(loc.latitude, loc.longitude, "Você chegou ao destino",
+                        0.0, "Destino", "arrive", "", 0), 0.0
+                )
                 say("Você chegou ao destino")
             }
             return
@@ -2173,8 +2217,7 @@ class MainActivity : Activity() {
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastInstructionRefreshMs >= 3000L) {
             lastInstructionRefreshMs = now
-            val remaining = d + steps.drop(stepIndex).sumOf { it.distanceM }
-            showInstruction("${s.text} · em ${fmtDist(d)}", "Faltam ${fmtDist(remaining)}")
+            showManeuver(s, d)
         }
     }
 
@@ -2213,25 +2256,45 @@ class MainActivity : Activity() {
         fetchRoute(loc, dest.latitude, dest.longitude, routeName, true)
     }
 
-    // Mostra a instrução no cartão do mapa e na linha de navegação do painel
-    private fun showInstruction(main: String, sub: String) {
-        // Os cartões e menus têm listeners de layout. Não reenviar o
-        // mesmo texto, evitando cascatas de layout e atualização de views.
-        val changed = mapInstructionView.text.toString() != main ||
-            mapInfoView.text.toString() != sub
-        if (!changed) return
-        if (mapInstructionView.text.toString() != main) mapInstructionView.text = main
-        if (mapInfoView.text.toString() != sub) mapInfoView.text = sub
-        val nav = "➜ $main"
-        if (navView.text.toString() != nav) navView.text = nav
-        val visible = if (main.isEmpty()) View.GONE else View.VISIBLE
-        if (navView.visibility != visible) navView.visibility = visible
-        navView.isSelected = true
-        // Só atualizar botões quando o cartão muda de visibilidade.
-        val shouldShow = hasRoute() && main.isNotEmpty()
-        if (instrCard.visibility != (if (shouldShow) View.VISIBLE else View.GONE)) {
-            refreshMapButtons()
+    // Navegação visual compacta: desenho vetorial + rua real + distância.
+    // A instrução completa continua exclusivamente na voz do navegador.
+    private fun showManeuver(step: Step, distanceMeters: Double) {
+        if (!::mapManeuverIcon.isInitialized || !::panelManeuverIcon.isInitialized) return
+        val action = ManeuverPresentation.action(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        val road = ManeuverPresentation.roadTitle(step.road, step.maneuverType, action)
+        val distanceText = if (step.maneuverType == "arrive" && distanceMeters <= 40.0) {
+            "Chegou"
+        } else fmtDist(distanceMeters.coerceAtLeast(0.0))
+
+        val wasHidden = instrCard.visibility != View.VISIBLE
+        if (mapInstructionView.text.toString() != road) mapInstructionView.text = road
+        if (mapInfoView.text.toString() != action) mapInfoView.text = action
+        if (mapManeuverDistance.text.toString() != distanceText) {
+            mapManeuverDistance.text = distanceText
         }
+        if (navView.text.toString() != road) navView.text = road
+        if (panelManeuverDistance.text.toString() != distanceText) {
+            panelManeuverDistance.text = distanceText
+        }
+        mapManeuverIcon.setManeuver(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        panelManeuverIcon.setManeuver(
+            step.maneuverType, step.maneuverModifier, step.exitNumber
+        )
+        mapManeuverIcon.contentDescription = action
+        panelManeuverIcon.contentDescription = action
+        instrCard.contentDescription = "$action, $road, em $distanceText"
+        if (navView.visibility != View.VISIBLE) navView.visibility = View.VISIBLE
+        if (panelManeuverDistance.visibility != View.VISIBLE) {
+            panelManeuverDistance.visibility = View.VISIBLE
+        }
+        if (panelManeuverIcon.visibility != View.VISIBLE) {
+            panelManeuverIcon.visibility = View.VISIBLE
+        }
+        if (wasHidden) refreshMapButtons()
     }
 
     // Busca a rota (usada na primeira vez e também no recálculo)
@@ -2268,7 +2331,11 @@ class MainActivity : Activity() {
                                 loc.getDouble(1),
                                 loc.getDouble(0),
                                 describe(man, s.optString("name")),
-                                s.getDouble("distance")
+                                s.getDouble("distance"),
+                                s.optString("name"),
+                                man.optString("type"),
+                                man.optString("modifier"),
+                                man.optInt("exit", 0)
                             )
                         )
                     }
@@ -2324,19 +2391,29 @@ class MainActivity : Activity() {
         holders.forEach { refreshRoute(it) }
         roadAlerts.setRoute(if (list.isNotEmpty()) points else emptyList())
 
-        // A partir do início da navegação, a moto deve acompanhar o GPS.
-        // A versão anterior desativava followMe e deixava o mapa parado.
+        // A navegação deve entrar diretamente no zoom da moto, nunca
+        // mostrar a rota inteira distante nem exigir o botão centralizar.
         if (!isRecalc) {
+            closeNavigationSearchOverlays()
             followMe = true
-            (mapFix ?: lastFix)?.let { position ->
-                holders.filter { it.interactive == (screenMode == 1) }
-                    .forEach { followCamera(it, position, false) }
+            val position = mapFix ?: lastFix
+            if (position != null) {
+                // Reaplica depois que o mapa terminar o layout do painel superior.
+                fullMap.post {
+                    if (followMe && routeDest == dest && screenMode == 1) {
+                        holders.filter { it.interactive }
+                            .forEach { followCamera(it, mapFix ?: lastFix ?: position, false) }
+                    }
+                }
             }
         }
 
         if (list.isNotEmpty()) {
             val first = list[stepIndex]
-            showInstruction(first.text, "Total ${fmtDist(totalM)} · cerca de ${(durS / 60).roundToInt()} min")
+            val metersToTurn = lastFix?.let {
+                distance(it.latitude, it.longitude, first.lat, first.lon)
+            } ?: first.distanceM
+            showManeuver(first, metersToTurn)
             say(if (isRecalc) "Rota recalculada. ${first.text}" else first.text)
         }
         refreshEtaPanels()
@@ -2372,8 +2449,12 @@ class MainActivity : Activity() {
 
         mapInstructionView.text = ""
         mapInfoView.text = ""
+        mapManeuverDistance.text = ""
         navView.text = ""
+        panelManeuverDistance.text = ""
         navView.visibility = View.GONE
+        panelManeuverIcon.visibility = View.GONE
+        panelManeuverDistance.visibility = View.GONE
         refreshEtaPanels()
         refreshMapButtons()
     }
@@ -2812,12 +2893,19 @@ class MainActivity : Activity() {
             topMargin = px(10)
         })
 
-        // Linha de navegação: fica numa linha só e desliza se for longa
-        navView = label(15f, cClock, bold = true, align = Gravity.CENTER).apply {
+        // Navegação compacta: seta de manobra REAL, rua e distância.
+        // Sem emoji nem frase longa deslizando na tela.
+        navView = label(12f, Color.WHITE, bold = true).apply {
             visibility = View.GONE
             isSingleLine = true
-            ellipsize = TextUtils.TruncateAt.MARQUEE
-            isSelected = true
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        panelManeuverDistance = label(12f, accent, bold = true).apply {
+            visibility = View.GONE
+            isSingleLine = true
+        }
+        panelManeuverIcon = ManeuverIconView(this, accent).apply {
+            visibility = View.GONE
         }
 
         // Cabeçalho da trip: mostra o status (em andamento, pausada, parada)
@@ -2984,15 +3072,28 @@ class MainActivity : Activity() {
         }
         // Dois acessos separados para evitar toque errado ao pilotar.
         // Instrução da rota centralizada ENTRE os acessos ao mapa e trips.
-        navView.textSize = 13f
         navView.setAutoSizeTextTypeUniformWithConfiguration(
-            10, 14, 1, TypedValue.COMPLEX_UNIT_SP
+            10, 12, 1, TypedValue.COMPLEX_UNIT_SP
         )
+        val miniNavText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(navView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(panelManeuverDistance, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        val miniManeuver = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(panelManeuverIcon, LinearLayout.LayoutParams(px(32), px(32)).apply {
+                rightMargin = px(4)
+            })
+            addView(miniNavText, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(mapBtn, LinearLayout.LayoutParams(px(44), px(40)))
-            addView(navView, LinearLayout.LayoutParams(0, px(40), 1f).apply {
+            addView(miniManeuver, LinearLayout.LayoutParams(0, px(40), 1f).apply {
                 leftMargin = px(6)
                 rightMargin = px(6)
             })
@@ -3153,16 +3254,44 @@ class MainActivity : Activity() {
             addView(addFavBtn, LinearLayout.LayoutParams(px(40), px(40)))
         }
 
-        // Cartão de instrução (só aparece com rota ativa)
-        mapInstructionView = label(18f, Color.WHITE, bold = true).apply { maxLines = 2 }
-        mapInfoView = label(13f, cClock)
+        // Cartão compacto: ícone de manobra vetorial + rua + distância.
+        // Mantém o nome real fornecido pelo OSRM, sem inventar ruas.
+        mapInstructionView = label(16f, Color.WHITE, bold = true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        mapInfoView = label(12f, cClock).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        mapManeuverDistance = label(16f, accent, bold = true, align = Gravity.END).apply {
+            maxLines = 1
+            setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, TypedValue.COMPLEX_UNIT_SP)
+        }
+        mapManeuverIcon = ManeuverIconView(this, accent)
+        val maneuverTitle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
+        }
+        val maneuverRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(mapManeuverIcon, LinearLayout.LayoutParams(px(50), px(50)).apply {
+                rightMargin = px(8)
+            })
+            addView(maneuverTitle, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(mapManeuverDistance, LinearLayout.LayoutParams(px(76), WRAP).apply {
+                leftMargin = px(8)
+            })
+        }
         instrCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = box(context, 0xEE0B1A33.toInt(), 14, 0x553A6FB0)
-            setPadding(px(14), px(10), px(14), px(10))
+            setPadding(px(12), px(8), px(12), px(8))
             visibility = View.GONE
-            addView(mapInstructionView, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(mapInfoView, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(maneuverRow, LinearLayout.LayoutParams(MATCH, WRAP))
         }
 
         val topCol = LinearLayout(this).apply {
