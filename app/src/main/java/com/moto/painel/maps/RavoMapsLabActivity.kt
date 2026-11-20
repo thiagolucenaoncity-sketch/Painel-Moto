@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.moto.painel.Diagnostics
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
@@ -29,6 +30,7 @@ class RavoMapsLabActivity : Activity() {
     private var mapView: MapView? = null
     private var started = false
     private var resumed = false
+    private var diagnosticsSession: Diagnostics.Session? = null
     private lateinit var content: FrameLayout
     private lateinit var coreTab: Button
     private lateinit var openTab: Button
@@ -78,6 +80,11 @@ class RavoMapsLabActivity : Activity() {
     }
 
     private fun show(engine: Engine) {
+        if (selected != engine || diagnosticsSession == null) {
+            diagnosticsSession?.stop()
+            diagnosticsSession = Diagnostics.Session(this, if (engine == Engine.CORE) "core" else "open")
+            if (resumed) diagnosticsSession?.start()
+        }
         selected = engine
         coreTab.setBackgroundColor(if (engine == Engine.CORE) 0xFFB05A19.toInt() else 0xFF19324C.toInt())
         openTab.setBackgroundColor(if (engine == Engine.OPEN) 0xFFB05A19.toInt() else 0xFF19324C.toInt())
@@ -133,10 +140,12 @@ class RavoMapsLabActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        diagnosticsSession?.start()
         mapView?.onResume()
     }
 
     override fun onPause() {
+        diagnosticsSession?.stop()
         resumed = false
         mapView?.onPause()
         super.onPause()
