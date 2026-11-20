@@ -2620,7 +2620,7 @@ class MainActivity : Activity() {
             arcView.layoutParams = arcParams
         }
         val textParams = gaugeText.layoutParams as? FrameLayout.LayoutParams ?: return
-        val textTop = gaugeTop + px(if (portrait) 23 else 25)
+        val textTop = gaugeTop + px(if (portrait) 31 else 34)
         if (textParams.topMargin != textTop) {
             textParams.topMargin = textTop
             gaugeText.layoutParams = textParams
@@ -2927,7 +2927,7 @@ class MainActivity : Activity() {
         arcView.setDashboardLook(ravoGauge, accent)
         speedView = label(
             if (digital) (if (landscape) 44f else 120f)
-            else (if (ravoGauge) (if (landscape) 34f else 31f) else if (landscape) 31f else 84f),
+            else (if (ravoGauge) (if (landscape) 49f else 42f) else if (landscape) 31f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2940,7 +2940,7 @@ class MainActivity : Activity() {
                 setShadowLayer(pxF(7f), 0f, 0f, accent)
             }
         }
-        unitView = label(if (ravoGauge) 11f else if (landscape) 10f else 16f,
+        unitView = label(if (ravoGauge) (if (landscape) 14f else 12f) else if (landscape) 10f else 16f,
             cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2953,7 +2953,7 @@ class MainActivity : Activity() {
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, if (ravoGauge) {
-                val size = px(if (landscape) 112 else 100)
+                val size = px(if (landscape) 164 else 146)
                 FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.START).apply {
                     leftMargin = px(8)
                     topMargin = px(10)
@@ -2965,9 +2965,9 @@ class MainActivity : Activity() {
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, if (ravoGauge) {
-                val size = px(if (landscape) 112 else 100)
+                val size = px(if (landscape) 164 else 146)
                 FrameLayout.LayoutParams(size, WRAP, Gravity.TOP or Gravity.START).apply {
-                    topMargin = px(if (landscape) 32 else 30)
+                    topMargin = px(if (landscape) 41 else 38)
                     leftMargin = px(8)
                 }
             } else if (landscape) {
@@ -2980,7 +2980,7 @@ class MainActivity : Activity() {
             // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
                 Gravity.TOP or Gravity.START).apply {
-                    topMargin = px(if (ravoGauge) (if (landscape) 125 else 113) else if (landscape) 54 else 8)
+                    topMargin = px(if (ravoGauge) (if (landscape) 182 else 163) else if (landscape) 54 else 8)
                     leftMargin = px(8)
                 })
         }
@@ -3366,7 +3366,7 @@ class MainActivity : Activity() {
             arcBlock.addView(miniManeuver,
                 FrameLayout.LayoutParams(MATCH, px(72),
                     Gravity.TOP or Gravity.START).apply {
-                    leftMargin = px(if (ravoGauge) 128 else 6)
+                    leftMargin = px(if (ravoGauge) 186 else 6)
                     rightMargin = px(58)
                     topMargin = px(13)
                 })
@@ -3457,7 +3457,7 @@ class MainActivity : Activity() {
             // abaixo dela e acessos mapa/trips fora do cartão de navegação.
             arcBlock.addView(miniManeuver,
                 FrameLayout.LayoutParams(MATCH, px(68), Gravity.TOP or Gravity.START).apply {
-                    leftMargin = px(if (ravoGauge) 115 else 7)
+                    leftMargin = px(if (ravoGauge) 163 else 7)
                     rightMargin = px(7)
                     topMargin = px(14)
                 })
