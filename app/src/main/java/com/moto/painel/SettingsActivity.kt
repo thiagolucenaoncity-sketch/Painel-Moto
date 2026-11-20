@@ -87,6 +87,10 @@ class SettingsActivity : Activity() {
             add(col, menuBtn("Aparência", R.drawable.ravo_menu_palette) { go("aparencia") }, 20)
             add(col, menuBtn("Velocímetro", R.drawable.ravo_menu_speed) { go("velocimetro") }, 10)
             add(col, menuBtn("Mapa", R.drawable.ravo_menu_map) { go("mapa") }, 10)
+            // Laboratório independente, sem modificar o motor do mapa principal.
+            add(col, plainBtn("RAVO Maps Lab · Open / Core (experimental)") {
+                startActivity(Intent(this, com.moto.painel.maps.RavoMapsLabActivity::class.java))
+            }, 10)
             add(col, menuBtn("Abertura do app", R.drawable.ravo_menu_play) { go("abertura") }, 10)
             add(col, menuBtn("Unidades", R.drawable.ravo_menu_ruler) { go("unidades") }, 10)
             add(col, menuBtn("Veículo", R.drawable.ravo_menu_bike) { go("veiculo") }, 10)
