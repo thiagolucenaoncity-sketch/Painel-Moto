@@ -2863,14 +2863,16 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(px(122), px(122),
                     Gravity.TOP or Gravity.END).apply {
                     topMargin = px(57)
-                    rightMargin = px(8)
+                    // Deixa a faixa de ferramentas livre à direita,
+                    // inclusive quando o menu está expandido.
+                    rightMargin = px(54)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, if (landscape) {
                 FrameLayout.LayoutParams(px(126), WRAP,
                     Gravity.TOP or Gravity.END).apply {
                     topMargin = px(if (digital) 69 else 84)
-                    rightMargin = px(6)
+                    rightMargin = px(52)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
@@ -3256,7 +3258,7 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(MATCH, px(43),
                     Gravity.TOP or Gravity.START).apply {
                     leftMargin = px(5)
-                    rightMargin = px(158)
+                    rightMargin = px(194)
                     topMargin = px(4)
                 })
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
