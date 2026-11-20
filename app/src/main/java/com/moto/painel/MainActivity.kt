@@ -2922,7 +2922,7 @@ class MainActivity : Activity() {
             if (landscape) {
                 // Android informa a altura útil em dp, independente de resolução/densidade.
                 setLandscapeSidebar(resources.configuration.screenHeightDp < 440)
-            } else setCompact(false)
+            } else setCompact(true) // ETA estreito entre os dois atalhos no retrato
         }
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
@@ -3492,7 +3492,6 @@ class MainActivity : Activity() {
             root.addView(vehicleRow, gap(0))
             // Retrato: faixa de instruções em toda a largura do minimapa;
             // velocímetro pequeno na esquerda, logo abaixo quando há rota.
-            miniManeuver.layoutParams = null
             navView.maxLines = 2
             navView.isSingleLine = false
             navView.setAutoSizeTextTypeUniformWithConfiguration(
