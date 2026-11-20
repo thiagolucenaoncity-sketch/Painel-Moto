@@ -3008,9 +3008,13 @@ class MainActivity : Activity() {
             tripBtn.text = if (tripStarted) "Finalizar" else "Iniciar"
             // Ícones sozinhos ficaram invisíveis em alguns aparelhos:
             // usar rótulos explícitos é mais confiável e acessível.
+            saveBtn.foreground = null
+            saveBtn.setCompoundDrawables(null, null, null, null)
             saveBtn.text = "Salvar"
             saveBtn.textSize = 11f
             saveBtn.contentDescription = "Salvar trip"
+            resetBtn.foreground = null
+            resetBtn.setCompoundDrawables(null, null, null, null)
             resetBtn.text = "Zerar"
             resetBtn.textSize = 11f
             resetBtn.contentDescription = "Zerar trip"
