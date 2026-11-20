@@ -3206,6 +3206,40 @@ class MainActivity : Activity() {
         fun gap(dp: Int) = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = px(dp) }
 
         if (landscape) {
+            // Topo em uma linha: hora + player à esquerda, GPS e moto no
+            // centro, data/bateria lado a lado e configurações à direita.
+            // Views são removidas dos pais anteriores ANTES da realocação.
+            topBar.removeAllViews()
+            rightCol.removeAllViews()
+            vehicleRow.removeAllViews()
+            val topClock = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(clockView, LinearLayout.LayoutParams(WRAP, WRAP))
+                // Reserva o espaço do player flutuante, junto ao relógio.
+                addView(View(this@MainActivity), LinearLayout.LayoutParams(px(43), px(36)))
+            }
+            val topCenter = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                addView(gpsView, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(vehicleView, LinearLayout.LayoutParams(MATCH, WRAP))
+            }
+            val topRight = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                addView(dateView, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                    rightMargin = px(5)
+                })
+                addView(batteryView, LinearLayout.LayoutParams(WRAP, WRAP).apply {
+                    rightMargin = px(4)
+                })
+                addView(settingsBtn, LinearLayout.LayoutParams(px(32), px(32)))
+            }
+            topBar.addView(topClock, LinearLayout.LayoutParams(WRAP, WRAP))
+            topBar.addView(topCenter, LinearLayout.LayoutParams(0, WRAP, 1f))
+            topBar.addView(topRight, LinearLayout.LayoutParams(WRAP, WRAP))
+
             // Mapa amplo à esquerda, trip em cartões empilhados à direita.
             // Voltar ao mapa grande acima da centralização, separado por 18dp.
             arcBlock.addView(mapBtn, FrameLayout.LayoutParams(
@@ -3213,15 +3247,22 @@ class MainActivity : Activity() {
                 leftMargin = px(8)
                 bottomMargin = px(5 + 42 + 18)
             })
+            // Instrução da próxima manobra SOBRE o mapa, alinhada à
+            // faixa horizontal do botão menu, e sem consumir altura abaixo.
+            navView.textSize = 12f
+            panelManeuverDistance.textSize = 12f
+            miniManeuver.setPadding(px(6), px(2), px(4), px(2))
+            arcBlock.addView(miniManeuver,
+                FrameLayout.LayoutParams(MATCH, px(43),
+                    Gravity.TOP or Gravity.START).apply {
+                    leftMargin = px(5)
+                    rightMargin = px(158)
+                    topMargin = px(4)
+                })
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             left.addView(topBar, LinearLayout.LayoutParams(MATCH, WRAP))
-            left.addView(panelEtaCard, gap(1))
-            left.addView(vehicleRow, gap(0))
+            // Sem ETA no topo, sem linha de manobra sob o mapa.
             left.addView(arcBlock, LinearLayout.LayoutParams(MATCH, 0, 1f))
-            // Instrução rápida em uma linha fina abaixo do minimapa.
-            left.addView(miniManeuver, LinearLayout.LayoutParams(MATCH, px(28)).apply {
-                topMargin = px(2)
-            })
 
             val buttons = listOf(tripBtn, resetBtn, saveBtn, tripsBtn)
             buttons.forEach { btn ->
@@ -3260,17 +3301,24 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(tripHeader, LinearLayout.LayoutParams(0, WRAP, 1f))
-                addView(pauseBtn, LinearLayout.LayoutParams(px(32), px(32)))
+                addView(pauseBtn, LinearLayout.LayoutParams(px(40), px(40)))
             }
             val right = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(tripHeading, gap(1))
-                addView(statsBox, gap(2))
-                addView(firstActions, gap(5))
+                addView(statsBox, gap(4))
+                // Preenche o espaço livre em altura. Em telas menores o
+                // ScrollView permite rolar, sem esconder pausa ou ações.
+                addView(View(this@MainActivity),
+                    LinearLayout.LayoutParams(MATCH, 0, 1f))
+                // Só aparece durante rota ativa, com Chegada/Restante/Distância
+                // empilhados na parte de baixo da lateral.
+                addView(panelEtaCard, gap(4))
+                addView(firstActions, gap(6))
                 addView(secondActions, gap(4))
             }
             val scroll = ScrollView(this).apply {
-                isFillViewport = false
+                isFillViewport = true
                 isVerticalScrollBarEnabled = false
                 addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
             }
