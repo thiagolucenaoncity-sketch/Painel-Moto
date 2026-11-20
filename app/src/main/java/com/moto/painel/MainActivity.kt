@@ -43,6 +43,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -1911,8 +1912,34 @@ class MainActivity : Activity() {
             toast("Aguardando sinal do GPS...")
             return
         }
+        closeNavigationSearchOverlays()
+        // Já ao selecionar um destino retorna ao zoom de condução. A rota
+        // ainda será validada quando chegar a resposta do OSRM.
+        followMe = true
+        (mapFix ?: origin).let { position ->
+            holders.filter { it.interactive == (screenMode == 1) }
+                .forEach { followCamera(it, position, false) }
+        }
         toast("Buscando rota...")
         fetchRoute(origin, lat, lon, name.take(60), false)
+    }
+
+    private fun closeNavigationSearchOverlays() {
+        // O favorito era mantido aberto mesmo depois de selecionado e
+        // a busca pendente podia reabrir sugestões sobre a rota.
+        handler.removeCallbacks(suggestRunnable)
+        suggestSeq++
+        skipSuggest = false
+        hideSuggestions()
+        if (::favRowView.isInitialized) favRowView.visibility = View.GONE
+        if (::searchInput.isInitialized) {
+            val keyboard = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            keyboard?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+            searchInput.clearFocus()
+        }
+        // O player e o menu lateral direito seguem o novo topo automaticamente.
+        if (::musicDock.isInitialized) musicDock.post { applyFabLayout() }
+        if (::mapToolsDock.isInitialized) mapToolsDock.post { positionMapTools() }
     }
 
     // ---------- Favoritos (endereço + apelido) ----------
@@ -2324,13 +2351,20 @@ class MainActivity : Activity() {
         holders.forEach { refreshRoute(it) }
         roadAlerts.setRoute(if (list.isNotEmpty()) points else emptyList())
 
-        // A partir do início da navegação, a moto deve acompanhar o GPS.
-        // A versão anterior desativava followMe e deixava o mapa parado.
+        // A navegação deve entrar diretamente no zoom da moto, nunca
+        // mostrar a rota inteira distante nem exigir o botão centralizar.
         if (!isRecalc) {
+            closeNavigationSearchOverlays()
             followMe = true
-            (mapFix ?: lastFix)?.let { position ->
-                holders.filter { it.interactive == (screenMode == 1) }
-                    .forEach { followCamera(it, position, false) }
+            val position = mapFix ?: lastFix
+            if (position != null) {
+                // Reaplica depois que o mapa terminar o layout do painel superior.
+                fullMap.post {
+                    if (followMe && routeDest == dest && screenMode == 1) {
+                        holders.filter { it.interactive }
+                            .forEach { followCamera(it, mapFix ?: lastFix ?: position, false) }
+                    }
+                }
             }
         }
 
