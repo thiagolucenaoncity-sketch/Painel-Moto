@@ -19,6 +19,7 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
     private val labels = mutableListOf<TextView>()
     private val values = mutableListOf<TextView>()
     private val groups = mutableListOf<LinearLayout>()
+    private val accentColor = accent
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
@@ -26,11 +27,11 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
         val container = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(4), dp(2), dp(4), dp(2))
+            setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         container.addView(TextView(context).apply {
             text = caption
-            textSize = 9f
+            textSize = 10f
             letterSpacing = 0.06f
             setTextColor(0xFFBED8F3.toInt())
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -41,14 +42,14 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
         groups.add(container)
         val value = TextView(context).apply {
             text = "—"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.WHITE)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = true
             maxLines = 1
             // Mantem ETA, minutos e km legiveis no espaco entre GPS e inicio.
-            setAutoSizeTextTypeUniformWithConfiguration(10, 16, 1, TypedValue.COMPLEX_UNIT_SP)
+            setAutoSizeTextTypeUniformWithConfiguration(11, 18, 1, TypedValue.COMPLEX_UNIT_SP)
         }
         container.addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         values.add(value)
@@ -66,7 +67,7 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
         background = GradientDrawable().apply {
             setColor(0xD90B1A33.toInt())
             cornerRadius = dp(15).toFloat()
-            setStroke(dp(1), (accent and 0x00FFFFFF) or 0x77000000)
+            setStroke(dp(2), (accent and 0x00FFFFFF) or 0xFF000000.toInt())
         }
         elevation = dp(3).toFloat()
         isClickable = false
@@ -102,26 +103,53 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
      * No retrato e no mapa completo o cartão continua horizontal.
      */
     fun setLandscapeSidebar() {
-        setCompact(true)
         orientation = VERTICAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(5), dp(4), dp(5), dp(4))
+        setPadding(dp(8), dp(8), dp(8), dp(8))
         groups.forEach { group ->
             val params = group.layoutParams as LayoutParams
             params.width = LayoutParams.MATCH_PARENT
             params.height = LayoutParams.WRAP_CONTENT
             params.weight = 0f
-            params.topMargin = dp(2)
-            params.bottomMargin = dp(2)
+            params.topMargin = dp(3)
+            params.bottomMargin = dp(3)
             group.layoutParams = params
-            group.setPadding(dp(2), dp(1), dp(2), dp(1))
+            group.setPadding(dp(4), dp(5), dp(4), dp(5))
         }
-        labels.forEach { it.textSize = 8f }
+        labels.forEach { it.textSize = 11f }
         values.forEach {
-            it.textSize = 12f
+            it.textSize = 20f
             it.setAutoSizeTextTypeUniformWithConfiguration(
-                10, 12, 1, TypedValue.COMPLEX_UNIT_SP
+                13, 20, 1, TypedValue.COMPLEX_UNIT_SP
             )
+        }
+        // Três seções bem separadas, ícones à esquerda e números em destaque.
+        val symbols = listOf("⚑", "◷", "⌖")
+        groups.forEachIndexed { index, group ->
+            group.orientation = HORIZONTAL
+            group.gravity = Gravity.CENTER_VERTICAL
+            val symbol = TextView(context).apply {
+                text = symbols[index]
+                textSize = 26f
+                setTextColor(accentColor)
+                gravity = Gravity.CENTER
+            }
+            group.addView(symbol, 0, LayoutParams(dp(46), dp(48)))
+            val descriptions = LinearLayout(context).apply {
+                orientation = VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val label = labels[index]
+            val value = values[index]
+            group.removeView(label)
+            group.removeView(value)
+            descriptions.addView(label, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            descriptions.addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            group.addView(descriptions, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            if (index < groups.lastIndex) {
+                val divider = View(context).apply { setBackgroundColor(0x665B7897) }
+                addView(divider, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)))
+            }
         }
     }
 
