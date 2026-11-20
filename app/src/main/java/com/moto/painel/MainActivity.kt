@@ -2884,7 +2884,10 @@ class MainActivity : Activity() {
 
         // Cartao de chegada acima do velocimetro, visivel somente na navegacao.
         panelEtaCard = RouteEtaCard(this, accent).apply {
-            if (landscape) setLandscapeSidebar() else setCompact(false)
+            if (landscape) {
+                // Android informa a altura útil em dp, independente de resolução/densidade.
+                setLandscapeSidebar(resources.configuration.screenHeightDp < 440)
+            } else setCompact(false)
         }
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
@@ -3409,28 +3412,36 @@ class MainActivity : Activity() {
                 addView(tripHeader, LinearLayout.LayoutParams(0, WRAP, 1f))
                 addView(pauseBtn, LinearLayout.LayoutParams(px(40), px(40)))
             }
+            // Coluna responsiva: os botões ficam presos ao rodapé e NUNCA
+            // são empurrados para fora por um ETA longo ou fonte ampliada.
+            // Só os indicadores rolam quando a altura útil é insuficiente.
+            val compactHeight = resources.configuration.screenHeightDp < 440
             val right = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(tripHeading, gap(1))
-                addView(statsBox, gap(4))
-                // Preenche o espaço livre em altura. Em telas menores o
-                // ScrollView permite rolar, sem esconder pausa ou ações.
+                addView(statsBox, gap(if (compactHeight) 2 else 4))
                 addView(View(this@MainActivity),
                     LinearLayout.LayoutParams(MATCH, 0, 1f))
-                // Só aparece durante rota ativa, com Chegada/Restante/Distância
-                // empilhados na parte de baixo da lateral.
-                addView(panelEtaCard, gap(4))
-                addView(firstActions, gap(6))
-                addView(secondActions, gap(4))
+                addView(panelEtaCard, gap(if (compactHeight) 2 else 4))
             }
-            val scroll = ScrollView(this).apply {
+            val metricsScroll = ScrollView(this).apply {
                 isFillViewport = true
                 isVerticalScrollBarEnabled = false
-                addView(right, LinearLayout.LayoutParams(MATCH, WRAP))
+                addView(right, LinearLayout.LayoutParams(MATCH, MATCH))
+            }
+            val footer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(firstActions, gap(if (compactHeight) 2 else 6))
+                addView(secondActions, gap(if (compactHeight) 2 else 4))
+            }
+            val sidebar = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(metricsScroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
+                addView(footer, LinearLayout.LayoutParams(MATCH, WRAP))
             }
             // Mais área horizontal para a via: 75% mapa / 25% trip.
             root.addView(left, LinearLayout.LayoutParams(0, MATCH, 3f))
-            root.addView(scroll, LinearLayout.LayoutParams(0, MATCH, 1f).apply {
+            root.addView(sidebar, LinearLayout.LayoutParams(0, MATCH, 1f).apply {
                 leftMargin = px(5)
             })
         } else {
