@@ -1322,12 +1322,13 @@ class MainActivity : Activity() {
         parent.getLocationOnScreen(parentCoords)
 
         val anchorY = if (screenMode == 0 && ::vehicleView.isInitialized) {
-            // Na mesma linha do apelido/modelo da moto, FORA do minimapa.
-            val vehicleCoords = IntArray(2)
-            vehicleView.getLocationOnScreen(vehicleCoords)
-            val vehicleHeight = vehicleView.height.takeIf { it > 0 } ?: px(46)
-            (vehicleCoords[1] - parentCoords[1] + vehicleHeight / 2f -
-                buttonSize / 2f)
+            // Paisagem: o player ocupa o espaço reservado ao lado do relógio.
+            // Retrato: mantém a posição antiga na linha da moto.
+            val anchor = if (landscape) clockView else vehicleView
+            val coords = IntArray(2)
+            anchor.getLocationOnScreen(coords)
+            val height = anchor.height.takeIf { it > 0 } ?: px(36)
+            (coords[1] - parentCoords[1] + height / 2f - buttonSize / 2f)
         } else if (screenMode == 1 && ::searchInput.isInitialized) {
             // O container superior só ocupa a altura das linhas visíveis:
             // buscar -> favoritos -> orientações (ou sugestões abertas).
@@ -1340,7 +1341,11 @@ class MainActivity : Activity() {
             (coords[1] - parentCoords[1] + anchor.height + px(12)).toFloat()
         } else px(80).toFloat()
 
-        val left = px(if (screenMode == 0) 16 else if (landscape) 12 else 24)
+        val left = if (screenMode == 0 && landscape) {
+            val clockCoords = IntArray(2)
+            clockView.getLocationOnScreen(clockCoords)
+            clockCoords[0] - parentCoords[0] + clockView.width + px(6)
+        } else px(if (screenMode == 0) 16 else if (landscape) 12 else 24)
         val maxLeft = (parent.width - if (musicOpen) popupWidth else buttonSize)
             .coerceAtLeast(px(8))
         val contentHeight = buttonSize + if (musicOpen) {
@@ -2768,8 +2773,9 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-            setPadding(px(if (landscape) 7 else 12), px(if (landscape) 4 else 8),
-                px(if (landscape) 7 else 12), px(if (landscape) 4 else 9))
+            // Na paisagem o minimapa desce até quase a borda inferior útil.
+            setPadding(px(if (landscape) 5 else 12), px(if (landscape) 2 else 8),
+                px(if (landscape) 5 else 12), px(if (landscape) 1 else 9))
         }
 
         // Barra superior: relógio, GPS e, à direita, data e bateria
@@ -2793,7 +2799,7 @@ class MainActivity : Activity() {
 
         // Cartao de chegada acima do velocimetro, visivel somente na navegacao.
         panelEtaCard = RouteEtaCard(this, accent).apply {
-            setCompact(landscape)
+            if (landscape) setLandscapeSidebar() else setCompact(false)
         }
 
         // Veículo: apelido grande e centralizado; marca e modelo menores abaixo
@@ -2827,8 +2833,8 @@ class MainActivity : Activity() {
         arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1 || gaugeStyle == 5
         speedView = label(
-            if (digital) (if (landscape) 50f else 120f)
-            else (if (landscape) 36f else 84f),
+            if (digital) (if (landscape) 44f else 120f)
+            else (if (landscape) 31f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2841,7 +2847,7 @@ class MainActivity : Activity() {
                 setShadowLayer(pxF(7f), 0f, 0f, accent)
             }
         }
-        unitView = label(if (landscape) 12f else 16f,
+        unitView = label(if (landscape) 10f else 16f,
             cUnit, align = Gravity.CENTER).apply { text = unitSpeed() }
         val centerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -2854,20 +2860,24 @@ class MainActivity : Activity() {
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(arcView, if (landscape) {
-                FrameLayout.LayoutParams(px(160), px(160),
-                    Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = px(14) }
+                FrameLayout.LayoutParams(px(122), px(122),
+                    Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(57)
+                    rightMargin = px(8)
+                }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, if (landscape) {
-                FrameLayout.LayoutParams(MATCH, WRAP,
-                    Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                    topMargin = px(if (digital) 8 else 39)
+                FrameLayout.LayoutParams(px(126), WRAP,
+                    Gravity.TOP or Gravity.END).apply {
+                    topMargin = px(if (digital) 69 else 84)
+                    rightMargin = px(6)
                 }
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
             // Placa no canto superior esquerdo: o direito fica para voz e noite.
             addView(roadLimitPlate(true), FrameLayout.LayoutParams(WRAP, WRAP,
                 Gravity.TOP or Gravity.START).apply {
-                    topMargin = px(8)
+                    topMargin = px(if (landscape) 54 else 8)
                     leftMargin = px(8)
                 })
         }
