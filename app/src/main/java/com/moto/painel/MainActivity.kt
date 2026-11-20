@@ -2822,7 +2822,7 @@ class MainActivity : Activity() {
         arcView.visibility = if (gaugeStyle == 1 || gaugeStyle == 5) View.GONE else View.VISIBLE
         val digital = gaugeStyle == 1 || gaugeStyle == 5
         speedView = label(
-            if (digital) (if (landscape) 66f else 120f) else (if (landscape) 46f else 84f),
+            if (digital) (if (landscape) 60f else 120f) else (if (landscape) 40f else 84f),
             cNum,
             bold = true,
             align = Gravity.CENTER
@@ -2847,10 +2847,10 @@ class MainActivity : Activity() {
         }
         val arcBlock = FrameLayout(this).apply {
             addView(minimap, FrameLayout.LayoutParams(MATCH, MATCH))
-            // Arco máximo de 225dp em paisagem: o mapa continua grande
-            // mesmo quando a altura da tela é pequena.
+            // O arco anterior de 225dp ainda dominava o minimapa em
+            // paisagem (ver captura do aparelho). Reduzido para 174dp.
             addView(arcView, if (landscape) {
-                FrameLayout.LayoutParams(px(225), px(225), Gravity.CENTER)
+                FrameLayout.LayoutParams(px(174), px(174), Gravity.CENTER)
             } else FrameLayout.LayoutParams(MATCH, MATCH))
             addView(centerCol, FrameLayout.LayoutParams(MATCH, MATCH))
             // Sobreposto ao minimapa, sem interferir nos números do velocímetro.
@@ -2953,7 +2953,10 @@ class MainActivity : Activity() {
         timeView = statValue(fmtHMS(elapsedMs()))
         maxView = statValue(speedText(maxSpeed))
         val statsBox = LinearLayout(this).apply {
-            orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            // Paisagem: os três valores numa faixa horizontal de baixa
+            // altura. Retrato continua com os três cards habituais.
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
         listOf(
             Pair("DISTÂNCIA", distView),
@@ -2963,15 +2966,17 @@ class MainActivity : Activity() {
             val card = statCard(title, value)
             if (landscape) {
                 // Texto da trip menor, sem blocos alaranjados gigantes.
-                value.textSize = 15f
+                value.textSize = 12f
                 value.setAutoSizeTextTypeUniformWithConfiguration(
-                    10, 15, 1, TypedValue.COMPLEX_UNIT_SP
+                    9, 12, 1, TypedValue.COMPLEX_UNIT_SP
                 )
-                (card.getChildAt(0) as TextView).textSize = 9f
-                card.setPadding(px(4), px(3), px(4), px(3))
+                (card.getChildAt(0) as TextView).textSize = 8f
+                card.setPadding(px(2), px(4), px(2), px(4))
             }
             val lp = if (landscape) {
-                LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(0, px(2), 0, px(2)) }
+                LinearLayout.LayoutParams(0, px(48), 1f).apply {
+                    setMargins(px(2), 0, px(2), 0)
+                }
             } else {
                 LinearLayout.LayoutParams(0, WRAP, 1f).apply { setMargins(px(4), 0, px(4), 0) }
             }
@@ -3001,12 +3006,14 @@ class MainActivity : Activity() {
         if (landscape) {
             tripBtn.textSize = 12f
             tripBtn.text = if (tripStarted) "Finalizar" else "Iniciar"
-            saveBtn.text = ""
+            // Ícones sozinhos ficaram invisíveis em alguns aparelhos:
+            // usar rótulos explícitos é mais confiável e acessível.
+            saveBtn.text = "Salvar"
+            saveBtn.textSize = 11f
             saveBtn.contentDescription = "Salvar trip"
-            saveBtn.panelIcon(R.drawable.ravo_panel_save, accent, 17)
-            resetBtn.text = ""
+            resetBtn.text = "Zerar"
+            resetBtn.textSize = 11f
             resetBtn.contentDescription = "Zerar trip"
-            resetBtn.panelIcon(R.drawable.ravo_panel_reset, cLabel, 17)
         }
         tripRow.addView(tripBtn, LinearLayout.LayoutParams(0, tripHeight, 1.55f).apply { setMargins(px(2), 0, px(2), 0) })
         tripRow.addView(pauseBtn, LinearLayout.LayoutParams(px(if (landscape) 32 else 36), tripHeight).apply { setMargins(0, 0, px(2), 0) })
