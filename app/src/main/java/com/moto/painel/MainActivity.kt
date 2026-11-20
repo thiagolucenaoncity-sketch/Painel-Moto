@@ -758,6 +758,7 @@ class MainActivity : Activity() {
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
+            Diagnostics.gpsFix(this@MainActivity, loc.accuracy)
             val kmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
             val shown = if (kmh < 2f) 0 else kmh.roundToInt()
 
@@ -989,8 +990,11 @@ class MainActivity : Activity() {
         syncMapLifecycle()
     }
 
+    private val diagnosticsSession by lazy { Diagnostics.Session(this, "original") }
+
     override fun onResume() {
         super.onResume()
+        diagnosticsSession.start()
         activityResumed = true
         // Se mudou alguma configuração na tela de Configurações, redesenha a tela principal
         if (Prefs.version(this) != appliedVer) {
@@ -1009,6 +1013,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        diagnosticsSession.stop()
         if (updaterLazyInitialized()) ravoUpdater.onPause()
         activityResumed = false
         syncMapLifecycle()
