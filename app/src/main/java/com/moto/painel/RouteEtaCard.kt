@@ -148,7 +148,7 @@ internal class RouteEtaCard(context: Context, accent: Int) : LinearLayout(contex
             group.addView(descriptions, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             if (index < groups.lastIndex) {
                 val divider = View(context).apply { setBackgroundColor(0x665B7897) }
-                addView(divider, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)))
+                addView(divider, index * 2 + 1, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)))
             }
         }
     }
