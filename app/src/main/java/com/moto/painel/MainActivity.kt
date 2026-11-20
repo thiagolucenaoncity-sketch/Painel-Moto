@@ -800,7 +800,7 @@ class MainActivity : Activity() {
                     m.addOnCameraIdleListener {
                         // Em pan/zoom atualizar as prioridades visuais apenas
                         // quando a câmera parou, nunca a cada quadro de animação.
-                        if (!followMe) refreshRoadAlerts(force = false)
+                        if (!followMe) refreshRoadAlerts(force = true)
                         // Consultar a área que o usuário abriu no mapa inteiro, mesmo longe do GPS.
                         if (m.cameraPosition.zoom >= 11.0 && !followMe) {
                             m.cameraPosition.target?.let { target ->
